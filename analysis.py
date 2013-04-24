@@ -104,6 +104,7 @@ class DriverIDsOnly:
         if x > 0: print "\n\t\t | "
         outfile.write(str(altnode.getID()))
         outfile.write(id)
+        x = x + 1
     outfile.flush()
     outfile.close()
 
@@ -113,19 +114,12 @@ class DriverIDsOnly:
       mapping = d[k]
       print("\n")
       print(str(k.getID()))
-      print("  ")
-      print(str(k.getCreatedTime()))
-      print("  ")
-      print(str(k.getText()))
       print(" -> ")
       x = 0
       for altnode in mapping:
         if x > 0: print "\n\t| "
         print(str(k.getID()))
-        print("  ")
-        print(str(k.getCreatedTime()))
-        print("  ")
-        print(str(k.getText()))
+        x = x + 1
 
   def process_TweetsFromFile(self, fnout, outfile):
   # Figure out which function should open the file.
@@ -226,7 +220,10 @@ class DriverNodes:
       outfile.write(str(k.getCreatedTime()))
       outfile.write("  ")
       #fails to handle unicode b/c I didn't code it up yet
-      outfile.write(str(k.getText()))
+#     outfile.write(str(k.getText()))
+      # TODO(paul): Test if this solves the unicode problem.
+      content = k.getText()
+      outfile.write(content.encode('utf-8'))
       outfile.write("  ->  ")
       x = 0
       for altnode in theset:
@@ -235,7 +232,11 @@ class DriverNodes:
         outfile.write("  ")
         outfile.write(str(altnode.getCreatedTime()))
         outfile.write("  ")
-        outfile.write(str(altnode.getText()))
+        #outfile.write(str(altnode.getText()))
+        content = altnode.getText()
+        outfile.write(content.encode('utf-8'))
+
+        x = x + 1
     outfile.flush()
     outfile.close()
 
@@ -248,17 +249,22 @@ class DriverNodes:
       print("  ")
       print(str(k.getCreatedTime()))
       print("  ")
-      print(str(k.getText()))
+#      print(str(k.getText()))
+      content = k.getText()
+      print(content.encode('utf-8'))
       print(" -> ")
       max = len(theset)
       for x in range(max):
         if x > 0: print "\n\t| "
         altnode = theset[x]
-        print(str(k.getID()))
+        print(str(altnode.getID()))
         print("  ")
-        print(str(k.getCreatedTime()))
+        print(str(altnode.getCreatedTime()))
         print("  ")
-        print(str(k.getText()))
+#        print(str(altnode.getText()))
+        content = altnode.getText()
+        print(content.encode('utf-8'))
+        x = x + 1
 
   def process_TweetsFromFile(self, ignore, fnout, outfile):
     # Figure out which function should open the file.

@@ -1,18 +1,26 @@
-(*Runs so far on smallest data set (286MB compressed, 2.4 GB decompressed):
-  PYHTON: 12 minutes
-  OCAML:
-     with ~8MB read chunksize bytecode -> 32 minutes
-     with ~16MB read chunksize native code -> 2 hours, 43 minutes  (memory consumption never broke 15%, possibly even 12%)
-     improved code with ~8MB read chunksize native code -> 3 minutes 34 seconds!!! Beats Python handily!
+(*Works on 3.12, should work on latest version 4+; requires findlib & 
+  unix (fairly standard libs, the latter is built-in) plus:
+  bz2 -> http://camlbz2.forge.ocamlcore.org/
+  yojson -> http://mjambon.com/yojson.html
+      & yojson dependencies: 
+      easy-format -> http://mjambon.com/ocaml.html
+      biniou -> http://mjambon.com/biniou.html
+      cppo -> http://mjambon.com/cppo.html
+  All can be manually installed or you can use an ocaml package manager...which I haven't bothered with yet.
+*)
+
+(*RUN TIME ANALYSIS SO FAR:
+  Runs so far on smallest data set (286MB compressed, 2.4 GB decompressed):
+  PYHTON (analysis.py): 12 minutes
+  OCAML: with ~8MB read chunksize native code -> 3 minutes 34 seconds
      (Initial results show 800MB (100 8MB chunks) processed in a little under 90 seconds while printing to screen too)
 
-     The improved code avoids what was heavy use of the substring operation which involves lots of copying of memory; also the 8MB chunksize might be working to my advantage due to the 8MB L2 cache size on my local machine...just guess.
-
   Mar12-13.bz2 (2.5GB compressed) runtimes
-  PYTHON: ~48 hours
-  OCAML: improved native code with ~8MB chunksize -> ~56 minutes HUGE IMPROVEMENT
+  PYTHON: ~48 hours & huge memory pressure
+  OCAML: improved native code with ~8MB chunksize -> ~56 minutes
+  Details:
   Started (Function time) [18:58:14 | Wed May 15]  (Command line time) [14:54:28|Wed May 15]
-  Memory usage hit ~35% @ ~18 minutes into run; ~42.7% @ ~22 minutes into run; ~53% @ ~29 minutes; ~81% @ ~43 minutes;
+  Memory usage hit ~35% @ ~18 minutes into run; ~42.7% @ ~22 minutes; ~53% @ ~29 minutes; ~81% @ ~43 minutes;
   FINISHED (Function time) [19:48:45 | Wed May 15]  (Command line time) [15:48:46|Wed May 15]
 *)
 
@@ -129,8 +137,7 @@ module ParseBZ2Tweets = struct
       close_out outchan;
     end;;
 
-  (*Be sure to #require "bz2"
-    val openBZ2file : string -> Bz2.in_channel*)
+  (* val openBZ2file : string -> Bz2.in_channel*)
   let openBZ2file ~file =
     let ch = Bz2.open_in (open_in file) in
     ch;;
@@ -142,7 +149,7 @@ module ParseBZ2Tweets = struct
   (*val fillBuffer : buffer:Buffer.t -> numchars:int -> string = <fun>*)
   let fillBuffer ~buffer ~numchars = 
     (*Use ! b/c the overwritten string buffer should not have any "!" 
-      chars in it and these are relatively easy to spot*)
+      chars in it and these are relatively easy to spot when debugging*)
     (*Bug fix: starting from zero causes off by one error; json string
       fail to parse b/c at boundaries of reads from archive a "!" char
       would be present within random position of json string*)
@@ -223,16 +230,14 @@ module ParseBZ2Tweets = struct
 			  
   (*Extract unique id, time stamp for inclusion in a dictionary*)
   (*val get_id_time_retweets : line:string ->
-      Yojson.Basic.json option * Yojson.Basic.json option *
-      Yojson.Basic.json option
-  *)
+      Yojson.Basic.json option * Yojson.Basic.json option * Yojson.Basic.json option         *)
   let get_id_time_retweets ~line = 
     let j = try      
 	      (*print_string "===Parsing line: "; print_string line; print_newline ()*)
 	      Yojson.Safe.from_string line;
       with _ -> (print_string "===Failed to Parse JSON: "; print_string line; print_newline (); `Null)
     in
-    (*Protect against tweets that r not retweets--ignore those*)
+    (*Protect against tweets that are not retweets--ignore those*)
     let retweet_status = try 
 			   Yojson.Basic.Util.member "retweeted_status" (Yojson.Safe.to_basic j) 
       with _ -> ((*print_string "===Failed to Parse B=== "; print_newline ();*) `Null)
@@ -250,65 +255,7 @@ module ParseBZ2Tweets = struct
 	      print_newline ();*)
 	      (Parsed (id, time, rid, rtime)));;
 
-(*  ====SLOWER OLD VERSION THAT DID TOO MUCH MEMORY COPYING====
-  (*Given bz2 tweet archive file, retrieves tweets one at a time and *)
-  (*val process_file : file:string -> outfile:string -> unit*)
-  let process_file ~file ~outfile ~htbl = 
-    let bz2inchan = openBZ2file ~file:file in
-    let createTrecord ~id ~time =
-      let id_s = Yojson.Basic.to_string id in
-      let id_i = int_of_string id_s in
-      let time_s_proto = Yojson.Basic.to_string time in
-      (*"Mon Mar 11 12:39:05 +0000 2013" wastes space, cut it down to: "Mar 11 12:39:05 2013"*)
-      let time_s = (String.sub time_s_proto 5 15) ^ (String.sub time_s_proto 26 5) in
-      {id = id_i; time_string = time_s}
-    in
-    let rec helper ~bz2inchan ~outfile ~htbl ~buf = 
-      (*The chunksize hugely affects runtime performance; obviously we'll never suffer huge memory
-	pressure as under python's bz2 but it appears we also run a little slower in the case of
-	small archives while running much better in the case of large archives*)
-      let nexttweet = get_next_tweet ~bzinchan:bz2inchan ~chunksize:8388608 ~sbufold:buf in
-      match nexttweet with
-	  (Good, toconsume, leftovers) ->
-	    (let tuple = get_id_time_retweets ~line:toconsume in
-	     match tuple with
-		 NoParse -> helper ~bz2inchan:bz2inchan ~outfile:outfile ~htbl:htbl ~buf:leftovers
-	       | (Parsed (id, time, rid, rtime)) -> 
-		 let sourcetweet = createTrecord ~id:rid ~time:rtime in
-		 let retweet = createTrecord ~id:id ~time:time in
-		 begin
-		   (*print_string "===Adding record for:";
-		     print_string id_s;
-		     print_tweetrecord ~trec:newtweetrec;*)
-		   Hashtbl.add htbl sourcetweet retweet;
-		   helper ~bz2inchan:bz2inchan ~outfile:outfile ~htbl:htbl ~buf:leftovers;
-		 end;)
-	| (_, toconsume, leftovers) -> 
-	  (let tuple = get_id_time_retweets ~line:toconsume in
-	   match tuple with
-	       NoParse -> 
-		 begin
-		   print_string "===Printing Hashtable and cleaning up.";
-		   printHTable ~hashtbl:htbl ~outfile:outfile;
-		   ();
-		 end
-	     | (Parsed (id, time, rid, rtime)) -> 
-	       let sourcetweet = createTrecord ~id:rid ~time:rtime in
-	       let retweet = createTrecord ~id:id ~time:time in
-	       begin
-		 (*print_string "===Adding record for:";
-		   print_string id_s;
-		   print_tweetrecord ~trec:newtweetrec;*)
-		 Hashtbl.add htbl sourcetweet retweet;
-		 print_string "===Printing Hashtable and cleaning up.";
-		 printHTable ~hashtbl:htbl ~outfile:outfile;
-		 ();
-	       end)
-    in
-    helper ~bz2inchan:bz2inchan ~outfile:outfile ~htbl:htbl ~buf:"";;
-*)
-
-  (*The chunksize hugely affects runtime performance; obviously we'll never suffer huge memory
+  (*The chunksize affects runtime performance; obviously we'll never suffer huge memory
     pressure as under python's bz2 but it appears we also run a little slower in the case of
     small archives while running much better in the case of large archives*)
   (*Given bz2 tweet archive file, retrieves tweets one at a time and *)
@@ -394,93 +341,3 @@ module ParseBZ2Tweets = struct
     end;;
   main ();;
 end
-  
-  
-
-
-(*==============FAILS===================
-  USING A STATIC reference buffer was ambitious and somehow didn't work; upon re-entry the
-  contents of the buffer are lost, but are not lost when it recursively calls itself, but
-  that's enough to screw us up.
-
-  (*Does what it says; maintains internal static buffer while consuming it
-    or fetching or more text from compressed archive until at least 1 
-    complete tweet can be returned to caller.*)
-  let rec get_next_tweet ~bzinchan ~chunksize =
-    let eof = ref false in
-    let staticbuff = ref (Buffer.create chunksize) in
-    let fillBuffer ~buffer ~numchars = 
-      for i = 0 to numchars do
-	Buffer.add_char buffer '0';
-      done;
-      Buffer.contents buffer in
-    (*val input_next_x_chars : Bz2.in_channel -> int -> string*)
-    let input_next_x_chars ~bzinchan ~howmanymore ~eofflag:flag =
-      let buf = Buffer.create howmanymore in
-      let sbuf = fillBuffer ~buffer:buf ~numchars:howmanymore in
-      try 
-	print_string "===Getting more chars from bz2 archive...===";
-	print_newline ();
-	ignore (Bz2.read bzinchan sbuf 0 howmanymore);
-	print_string "===Got: "; print_string sbuf;
-	print_newline ();
-	sbuf;
-      with End_of_file -> (Bz2.close_in bzinchan;
-			   flag := true;
-			   sbuf;)
-	| _ -> (Bz2.close_in bzinchan;
-		flag := true;
-		sbuf;)
-    in
-    fun () -> 
-      begin (*Ugly way of indicating EOF, but is first buffer producer/consumer 
-	      implementation I've ever written for ocaml*)
-	print_string "===Static Buffer initial state:";
-	print_string (Buffer.contents !staticbuff);
-	print_newline ();
-	if !eof then "ENDOFFILE" else
-	  let rwedoneold = String.contains (Buffer.contents !staticbuff) '\n' in
-	  (*if buffer already has 1 complete tweet, just consume it from buffer*)
-	  if rwedoneold then
-	    let oldpos = String.index (Buffer.contents !staticbuff) '\n' in
-	    let oldlen = String.length (Buffer.contents !staticbuff) in
-	    let buf2 = Buffer.create (String.length (Buffer.contents !staticbuff)) in
-	    begin
-	      print_string "===Buffer already had a tweet in it; consuming some of it...===";
-	      print_newline ();
-	      Buffer.add_string buf2 (Buffer.contents !staticbuff);
-	      Buffer.clear !staticbuff;
-	      Buffer.add_string !staticbuff (String.sub (Buffer.contents buf2) (oldpos + 1) (oldlen - oldpos - 1));
-	      String.sub (Buffer.contents buf2) 0 oldpos;
-	    end
-	  else  (*buffer doesn't have even 1 complete tweet, get more decomressed text from dataset*)
-	    let rwedonenew = ref false in
-	    let updatedBuff_s = "" in
-	    while not !rwedonenew && not !eof do
-	      let nextblock = input_next_x_chars ~bzinchan:bzinchan ~howmanymore:chunksize ~eofflag:eof in
-	      let _ = Buffer.add_string !staticbuff nextblock in
-	      (*updatedBuff_s = Buffer.contents !staticbuff;*)
-	      print_string "===Static buffer updated...=== ";
-	      (*print_string (Buffer.contents !staticbuff);*)
-	      print_newline ();
-	      rwedonenew := String.contains (Buffer.contents !staticbuff) '\n';
-	    done;
-	    let length = String.length (Buffer.contents !staticbuff) in
-	    let pos = String.index (Buffer.contents !staticbuff) '\n' in
-	    let buf2 = Buffer.create (String.length (Buffer.contents !staticbuff)) in
-	    begin
-	      print_string "===Buffer did not have tweet in it, had to go get more text...===";
-	      print_string "===Buffer has: ";
-	      print_string (Buffer.contents !staticbuff);
-	      print_string "===Found newline at pos:"; print_string (string_of_int pos);
-	      print_newline ();
-	      Buffer.add_string buf2 (Buffer.contents !staticbuff);
-	      Buffer.clear !staticbuff;
-	      Buffer.add_string !staticbuff (String.sub (Buffer.contents buf2) (pos+1) (length - pos - 1));
-	      String.sub (Buffer.contents buf2) 0 pos;
-	    end;
-      end;;
-*)
-
-
-

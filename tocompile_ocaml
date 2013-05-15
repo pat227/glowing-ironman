@@ -1,3 +1,4 @@
+TO GENERATE BYTE-CODE (INTERPRETED):
 ocamlc 
 -I /usr/local/lib/ocaml/site-lib/easy-format 
 -I /usr/local/lib/ocaml/site-lib/bz2 
@@ -8,8 +9,8 @@ unix.cma bz2.cma easy_format.cmo biniou.cma yojson.cmo works.ml
 
 ocamlc -I /usr/local/lib/ocaml/site-lib/easy-format -I /usr/local/lib/ocaml/site-lib/bz2 -I /usr/local/lib/ocaml/site-lib/biniou -I /usr/local/lib/ocaml/site-lib/yojson unix.cma bz2.cma easy_format.cmo biniou.cma yojson.cmo works.ml -linkall -o twitparser
 
-
-ocampopt
+TO GENERATE NATIVE CODE (FASTER):
+ocamlopt
 -I /usr/local/lib/ocaml/site-lib/easy-format 
 -I /usr/local/lib/ocaml/site-lib/bz2 
 -I /usr/local/lib/ocaml/site-lib/biniou 

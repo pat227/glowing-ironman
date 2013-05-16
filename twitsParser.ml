@@ -9,14 +9,15 @@
   All can be manually installed or you can use an ocaml package manager...which I haven't bothered with yet.
 *)
 
-(*RUN TIME ANALYSIS SO FAR:
+(*RUN TIME ANALYSIS SO FAR: 
+  text gathering and got:
   Runs so far on smallest data set (286MB compressed, 2.4 GB decompressed):
-  PYHTON (analysis.py): 12 minutes
+  PYHTON (analysis.py): 12 minutes (no text)
   OCAML: with ~8MB read chunksize native code -> 3 minutes 34 seconds
      (Initial results show 800MB (100 8MB chunks) processed in a little under 90 seconds while printing to screen too)
 
   Mar12-13.bz2 (2.5GB compressed) runtimes
-  PYTHON: ~48 hours & huge memory pressure
+  PYTHON: ~48 hours & huge memory pressure b/c of text...without text: ~15 hours + counting 
   OCAML: improved native code with ~8MB chunksize -> ~56 minutes
   Details:
   Started (Function time) [18:58:14 | Wed May 15]  (Command line time) [14:54:28|Wed May 15]

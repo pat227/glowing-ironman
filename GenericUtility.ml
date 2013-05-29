@@ -1,9 +1,10 @@
-module GenericUtility : sig
+module GenericUtility (*: sig
   val print_GMTime : unit -> unit
   val fst : 'a * 'b -> 'a
   val snd : 'a * 'b -> 'b
   val thd : 'a * 'b * 'c -> 'c
-end = struct
+  val print2Afile_Int32Map : int32 MAP.t  -> outfile:string -> unit
+end*) = struct
   (*For anyone who does not have time output as part of 
     the prompt with which to better guage runtimes*)
   let print_GMTime () = 
@@ -56,6 +57,29 @@ end = struct
 
   let fst (x, _) = x;;
   let snd (_, x) = x;;
-  let thd (_, _, x) = x;;
+  let fst3 (x, _, _) = x;;
+  let snd3 (_, x, _) = x;;
+  let thd3 (_, _, x) = x;;
+
+  (*This nested module must be used by outside module to take advantage of the print function*)
+  module Int32_INT_MAP = Map.Make(Int32);;
+
+  let print2Afile_Int32Map ~amap ~outfile =
+    let outchan = open_out outfile in
+    let bindings = Int32_INT_MAP.bindings amap in
+    let rec helper ~list ~outchan = 
+      match list with 
+	  i2i_binding :: rest -> let key = fst(i2i_binding) in
+				 let value = snd(i2i_binding) in
+				 begin
+				   output_string outchan (Int32.to_string key);
+				   output_string outchan ", ";
+				   output_string outchan (Int32.to_string value);
+				   output_char outchan '\n';
+				   helper ~list:rest ~outchan:outchan;
+				 end;
+	| [] -> (close_out outchan; (););
+    in
+    helper ~list:bindings ~outchan:outchan;;
   
 end

@@ -33,3 +33,18 @@ nosetests.xml
 .mr.developer.cfg
 .project
 .pydevproject
+
+#ocaml
+*.cmi
+*.cmo
+*.cmx
+
+#emacs turds
+*.*~
+
+#non code
+*.txt
+*.*gz*
+*.*tar*
+*.*bz2*
+*.o

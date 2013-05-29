@@ -6,12 +6,10 @@
 module TweetRecord : sig 
   type t = { _id_ : int; _userid_: int ; _username_: string ; 
 	    _time_string_: string; _text_:string };;
-  type elt = t
   val compare: t -> t -> int
 end = struct
   type t = { _id_ : int; _userid_: int ; _username_: string ; 
 	    _time_string_: string; _text_:string };;
-  type elt = t;;
   let compare t1 t2 = Int64.compare (Int64.of_int t1._id_) (Int64.of_int t2._id_);;
 end
 
@@ -21,7 +19,7 @@ end
   entire dataset again; this cannot be done for text b/c memory pressure even for a relatively "small" data set
   is enormous even with more fine grained memory management. *)
 module Followup = struct
-  (*let tweets_HASHtbl : (TweetRecord.t, TweetRecord.t) Hashtbl.t;; = Hashtbl.create(4194304);;*)  
+
   module Tweetset = Set.Make(TweetRecord);;
 
   (*A good amount of this module and the one above share some functions that will be factored out into
@@ -51,7 +49,7 @@ module Followup = struct
 
   (*The older type being recovered from the input file that has less datums*)
   (*type tweet_recordOLD = {id : int; time_string: string;};;*)
-(*  let tweets_HASHtbl_OLD : (tweet_recordOLD, tweet_recordOLD) Hashtbl.t = Hashtbl.create(8192);; *)
+  (*let tweets_HASHtbl_OLD : (tweet_recordOLD, tweet_recordOLD) Hashtbl.t = Hashtbl.create(8192);; *)
   let tweets_HASHtbl_OLD : (TweetRecord.t, TweetRecord.t) Hashtbl.t = Hashtbl.create(8192);;
 
   (*Clearer intention that just hinging on true/false or other values*)
@@ -71,11 +69,7 @@ module Followup = struct
     (*let buf = Buffer.create howmanymore in*)
     let sbuf = String.make howmanymore '!' in (*fillBuffer ~buffer:buf ~numchars:howmanymore in*)
     try 
-      (*print_string "===Getting more chars from bz2 archive...===";
-	print_newline ();*)
       ignore (Bz2.read bzinchan sbuf 0 howmanymore);
-      (*print_string "===Got: "; print_string sbuf;
-      print_newline ();*)
       (Good, sbuf);
     with End_of_file -> (Bz2.close_in bzinchan;
 			 (EndofFile, sbuf;))
@@ -114,7 +108,7 @@ module Followup = struct
 	      (Bad, merged, "")
       end;;
 
-  (*Gets id, userid, username, time & text of a tweet & retweet pair
+  (*Gets id, userid, username, time & text of a tweet & retweet pair (not adhoc retweets)
     val getRetweetsExtraInfo : line:string -> parse_result   *)
   let getRetweetsExtraInfo ~line = 
     let j = try      
@@ -142,11 +136,6 @@ module Followup = struct
 	      let ruserid = Yojson.Basic.Util.member "id" ruserj in
 	      let rusername = Yojson.Basic.Util.member "screen_name" ruserj in
 	      let rtext = Yojson.Basic.Util.member "text" retweet_status in
-	      (*print_string "===Parsed; returning triple..."; 
-	      print_string (Yojson.Basic.to_string id);
-	      print_string (Yojson.Basic.to_string rid);
-	      print_string (Yojson.Basic.to_string rtime);
-	      print_newline ();*)
 	      (RetweetParsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)))
   
   (*From file with entries that look like:    "310250954186444801, Mar 09 04:49:26 2013"
@@ -201,16 +190,16 @@ module Followup = struct
       | [] -> (htbl, set) in
     helper ~set:set ~htbl:htbl ~elemlist:accum ~key:key;;
 
-  module FreqMap = Map.Make(Int32);; 
+  module FreqMap = GenericUtility.Int32_INT_MAP;;
     
   (*Parse the file that was a hashtable of keys->mappings; find those tweets with > X retweets mappings; 
-    make a set of those only while also reconstructing the original hashtable.
+    make a set of those only while also reconstructing the original hashtable. Also create histogram-ready
+    frequency distribution map.
     val parseTable4PopularTweets :
     file:string -> (Tweetset.elt, Tweetset.elt) Hashtbl.t * Tweetset.t * int32 FreqMap.t
   *)
-  let parseTable4PopularTweets ~file ~outfile =
+  let parseTable4PopularTweets ~file =
     let inchan = open_in file in
-    let outchan = open_out outfile in 
     let regexp_arrow = Str.regexp " -> " in
     let rec helper ~inchan ~accum ~htbl ~set ~map =
       let nextline = try (Some (input_line inchan)) with End_of_file -> (close_in inchan; None) in
@@ -302,8 +291,8 @@ module Followup = struct
 	    let sourcetweet = createTrecord ~id:rid ~time:rtime ~userid:ruserid ~username:rusername ~text:rtext in
 	    let retweet = createTrecord ~id:id ~time:time ~userid:userid ~username:username ~text:text in
 	    let updatedSet = updateSet ~set:set ~tweet:sourcetweet in
-	    let updatedSet2 = updateSet ~set:set ~tweet:retweet in
-	    consumeBuf ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~set:updatedSet;
+	    let updatedSet2 = updateSet ~set:updatedSet ~tweet:retweet in
+	    consumeBuf ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~set:updatedSet2;
 	| NoParse -> 
 	  consumeBuf ~set:set ~stringbuf:stringbuf ~startpos:(nextbreak+1)
     in
@@ -321,11 +310,67 @@ module Followup = struct
 	let t = consumeBuf ~set:set ~stringbuf:toconsume ~startpos:0 in
 	let updatedset = GenericUtility.fst t in
 	begin
-	  print_string "===Finished creating popular tweets set.";
+	  print_string "===Finished creating popular tweets set===";
 	  updatedset;
 	end
     in
     helper ~set:set ~bz2inchan:bz2inchan ~chunksize:8388608 ~leftover:"";;
-
   
+  (*Took a short while to get the next line exactly correct*)
+  let tweets_HASHtbl_NEW : (Tweetset.t, Tweetset.elt) Hashtbl.t = Hashtbl.create(8192);;
+
+  (*Using the Set of tweet & retweet (not ad hoc) records that contain text, 
+    time, username, userid and the old hashtable of mappings, construct a new
+    hashtable of mappings.
+    val constructNewHtbl : set:Tweetset.t -> 
+    oldHtbl:(TweetRecord.t, TweetRecord.t) Hashtbl.t -> 
+    newHtbl:'a -> unit  *)
+  let constructNewHtbl ~set ~oldHtbl ~newHtbl = 
+    let setref = ref set in 
+    let semiequal tweetA tweetB = 
+      if tweetA.TweetRecord._id_ == tweetB.TweetRecord._id_ && 
+	tweetA.TweetRecord._time_string_ == tweetB.TweetRecord._time_string_ 
+      then true else false in
+    let toiter ~newHtbl ~set key binding =
+      let sets = Tweetset.partition (semiequal binding) !set in
+      let toInsert = GenericUtility.fst sets in
+      let sets2 = Tweetset.partition (semiequal key) !set in
+      let key2use = GenericUtility.fst sets2 in
+      begin
+	if Tweetset.cardinal toInsert == 1 then 
+	  (Hashtbl.add newHtbl key2use (Tweetset.choose toInsert);
+	   (*update the ref in next line; do not use sets2, we need the set to 
+	     always hold the key since we're dealing with multiple bindings; 
+	     otherwise we'd get back an empty set upon next iter and partition 
+	     and have no key to use at all in above line.*)
+           set := GenericUtility.snd sets)
+	else
+	  print_string "===This should never happen, tweetIDs are supposed to be unique!===";
+      end
+    in
+    let rec helper ~set ~oldHtbl ~newHtbl = 
+      let williter = toiter ~newHtbl:newHtbl ~set:set in
+      Hashtbl.iter williter oldHtbl
+    in
+    helper ~set:setref ~oldHtbl:oldHtbl ~newHtbl:newHtbl;;
+
+  (*val constructNewHtbl :
+    set:Tweetset.t ->
+    oldHtbl:(TweetRecord.t, TweetRecord.t) Hashtbl.t ->
+    newHtbl:(Tweetset.t, Tweetset.elt) Hashtbl.t -> unit *)
+  let main ()=
+    let infile = Sys.argv.(1) in   (* eg "a bz2 file"*) 
+    let outfile = Sys.argv.(2) in   (* eg "histogram.txt"*)
+    let triple = parseTable4PopularTweets ~file:infile in
+    let oldhtbl = GenericUtility.fst3 triple in
+    let thinset = GenericUtility.snd3 triple in
+    let freqmap = GenericUtility.thd3 triple in
+    let fatset = fillSet ~set:thinset ~compressedfile:infile in
+    let newHtbl = constructNewHtbl ~set:fatset ~oldHtbl:oldhtbl ~newHtbl:tweets_HASHtbl_NEW in
+    begin
+      GenericUtility.print2Afile_Int32Map ~amap:freqmap ~outfile:outfile;
+    end;;    
+  
+  (*main ();*)
+
 end

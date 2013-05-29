@@ -17,7 +17,7 @@
      (Initial results show 800MB (100 8MB chunks) processed in a little under 90 seconds while printing to screen too)
 
   Mar12-13.bz2 (2.5GB compressed) runtimes
-  PYTHON: ~48 hours & huge memory pressure b/c of text...without text: ~15 hours + counting 
+  PYTHON: ~48 hours & huge memory pressure b/c of text...without text: ~15 hours + counting I called it quits, it was doing a number on my hard drive, thrashing that read/write head
   OCAML: improved native code with ~8MB chunksize -> ~56 minutes
   Details:
   Started (Function time) [18:58:14 | Wed May 15]  (Command line time) [14:54:28|Wed May 15]
@@ -27,6 +27,8 @@
 
 module GenericUtility : sig
   val print_GMTime : unit -> unit
+  val fst : 'a * 'b -> 'a 
+  val snd : 'a * 'b -> 'b
 end = struct
   (*For anyone who does not have time output as part of 
     the prompt with which to better guage runtimes*)
@@ -77,14 +79,17 @@ end = struct
       print_int (tmstruct.Unix.tm_mday);
       print_string "]";
     end;;
-end
 
+  let fst (x, _) = x;;
+  let snd (_, x) = x;;
+
+end
 
 (*Tweet-specific functions go here*)
 module ParseBZ2Tweets = struct
 
-  (*We might want to store the time not as a string in future; & we might want
-    to add the text of the tweet itself at some point*)
+  (*We might want to store the time not as a string in future but as a more 
+    robust more easily comparable data type of its own*)
   type tweet_record = {id : int; time_string: string;};;
 
   let print_tweetrecord ~trec = 
@@ -99,11 +104,10 @@ module ParseBZ2Tweets = struct
     
   (*Based on the mar9-11 dataset, the python script output was 4,692,976 lines 
     long (898M), an unknown number of which were not keys; also that run took 
-    almost 48 hours due to extreme memory pressure--lets hope that doesn't 
-    repeat itself. *)
+    almost 48 hours due to extreme memory pressure...on which we have improved *)
   let tweets_HASHtbl : (tweet_record, tweet_record) Hashtbl.t = Hashtbl.create(4194304);;
 
-  (*Pretty prints hashtable to file*)
+  (*Pretty prints hashtable to file serves as input for module far below*)
   (*val printHTable : hashtbl:(int, tweet_record) Hashtbl.t -> outfile:string -> unit *)
   let printHTable ~hashtbl ~outfile = 
     let outchan = open_out outfile in 
@@ -154,6 +158,7 @@ module ParseBZ2Tweets = struct
     (*Bug fix: starting from zero causes off by one error; json string
       fail to parse b/c at boundaries of reads from archive a "!" char
       would be present within random position of json string*)
+    (*In retrospect, could've should've used String.make function*)
     for i = 1 to numchars do
       Buffer.add_char buffer '!';
     done;
@@ -165,29 +170,13 @@ module ParseBZ2Tweets = struct
     | Bad
     | EndofFile;;
 
-  (*Use return type to avoid potential and imagined incomplete matches*)
-  type parse_result = Parsed of Yojson.Basic.json * Yojson.Basic.json * Yojson.Basic.json * Yojson.Basic.json
-		      | NoParse;;
+  (*Use return type to avoid potential or illusory incomplete matches*)
+  type parse_result = RetweetParsed of Yojson.Basic.json * Yojson.Basic.json * Yojson.Basic.json * Yojson.Basic.json
+    | NoParse;;
   
-  (*val input_next_x_chars : Bz2.in_channel -> int -> string*)
-  let input_next_x_chars ~bzinchan ~howmanymore =
-    let buf = Buffer.create howmanymore in
-    let sbuf = fillBuffer ~buffer:buf ~numchars:howmanymore in
-    try 
-      (*print_string "===Getting more chars from bz2 archive...===";
-      print_newline ();*)
-      ignore (Bz2.read bzinchan sbuf 0 howmanymore);
-      (*print_string "===Got: "; print_string sbuf;
-      print_newline ();*)
-      (Good, sbuf);
-    with End_of_file -> (Bz2.close_in bzinchan;
-			 (EndofFile, sbuf;))
-      | _ -> (Bz2.close_in bzinchan;
-			 (Bad, sbuf;));;
-
   let input_next_x_chars_improved ~bzinchan ~howmanymore =
-    let buf = Buffer.create howmanymore in
-    let sbuf = fillBuffer ~buffer:buf ~numchars:howmanymore in
+    (*let buf = Buffer.create howmanymore in*)
+    let sbuf = String.make howmanymore '!' in (*fillBuffer ~buffer:buf ~numchars:howmanymore in*)
     try 
       (*print_string "===Getting more chars from bz2 archive...===";
 	print_newline ();*)
@@ -208,7 +197,7 @@ module ParseBZ2Tweets = struct
       (Good, (String.sub sbufold 0 pos), (String.sub sbufold (pos+1) (length - pos - 1)))
     else
       begin
-	let t = input_next_x_chars ~bzinchan:bzinchan ~howmanymore:chunksize in 
+	let t = input_next_x_chars_improved ~bzinchan:bzinchan ~howmanymore:chunksize in 
 	match t with
 	    (Good, sbuf2) -> 
 	      let merged = sbufold ^ sbuf2 in
@@ -228,7 +217,6 @@ module ParseBZ2Tweets = struct
 	      (Bad, merged, "")
       end;;
 
-			  
   (*Extract unique id, time stamp for inclusion in a dictionary*)
   (*val get_id_time_retweets : line:string ->
       Yojson.Basic.json option * Yojson.Basic.json option * Yojson.Basic.json option         *)
@@ -254,7 +242,7 @@ module ParseBZ2Tweets = struct
 	      print_string (Yojson.Basic.to_string rid);
 	      print_string (Yojson.Basic.to_string rtime);
 	      print_newline ();*)
-	      (Parsed (id, time, rid, rtime)));;
+	      (RetweetParsed (id, time, rid, rtime)))
 
   (*The chunksize affects runtime performance; obviously we'll never suffer huge memory
     pressure as under python's bz2 but it appears we also run a little slower in the case of
@@ -263,8 +251,6 @@ module ParseBZ2Tweets = struct
   (*val process_file : file:string -> outfile:string -> unit*)
   let process_file_improved ~file ~outfile ~htbl ~chunksize = 
     let bz2inchan = openBZ2file ~file:file in
-    let fst (x, _) = x in
-    let snd (_, x) = x in
     let createTrecord ~id ~time =
       let id_s = Yojson.Basic.to_string id in
       let id_i = int_of_string id_s in
@@ -286,7 +272,7 @@ module ParseBZ2Tweets = struct
 	let toconsume = String.sub stringbuf startpos (nextbreak - startpos) in
 	let tuple = get_id_time_retweets ~line:toconsume in
 	match tuple with
-	    (Parsed (id, time, rid, rtime)) -> 
+	    (RetweetParsed (id, time, rid, rtime)) -> 
 	      let sourcetweet = createTrecord ~id:rid ~time:rtime in
 	      let retweet = createTrecord ~id:id ~time:time in
 	      begin
@@ -308,13 +294,13 @@ module ParseBZ2Tweets = struct
 	  (Good, toconsume) ->  
 	    let merged = leftover ^ toconsume in 
 	    let t = consumeBuf ~htbl:htbl ~stringbuf:merged ~startpos:0 in
-	    let updatedhtbl = fst t in
-	    let leftoverstart = snd t in
+	    let updatedhtbl = GenericUtility.fst t in
+	    let leftoverstart = GenericUtility.snd t in
 	    let leftover = String.sub merged leftoverstart ((String.length merged) - leftoverstart) in	    
 	    helper ~bz2inchan:bz2inchan ~outfile:outfile ~htbl:updatedhtbl ~chunksize:chunksize ~leftover:leftover;
 	| (_, toconsume) -> 
 	  let t = consumeBuf ~htbl:htbl ~stringbuf:toconsume ~startpos:0 in
-	  let updatedhtbl = fst t in
+	  let updatedhtbl = GenericUtility.fst t in
 	  begin
 	    print_string "===Printing Hashtable and cleaning up.";
 	    printHTable ~hashtbl:updatedhtbl ~outfile:outfile;
@@ -322,8 +308,7 @@ module ParseBZ2Tweets = struct
 	  end
 	(*end*)
     in
-    helper ~bz2inchan:bz2inchan ~outfile:outfile ~htbl:htbl ~chunksize:chunksize ~leftover:"";;
-  
+    helper ~bz2inchan:bz2inchan ~outfile:outfile ~htbl:htbl ~chunksize:chunksize ~leftover:"";;  
 
   (*val main : unit -> 'a*)
   let main () =
@@ -340,5 +325,6 @@ module ParseBZ2Tweets = struct
       print_newline();
       exit 0;
     end;;
-  main ();;
+
+  (*main ();;*)
 end

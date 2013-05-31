@@ -85,6 +85,28 @@ end = struct
       Hashtbl.iter (writeFold outchan) hashtbl;
       close_out outchan;
     end;;
+  (*val tm_ofTweet : t -> Unix.tm *)
+  let tm_ofTweet ~tweetrec = 
+    let time = tweetA.TweetRecord._time_string_ in
+    (*each of the form: "Mar 11 12:39:05 2013"*)
+    let space1 = (String.index_from timeA 0 ' ') + 1 in
+    let space2 = (String.index_from timeA space1 ' ') + 1 in
+    let space3 = (String.index_from timeA space2 ' ') + 1 in
+    let space4 = (String.index_from timeA space3 ' ') + 1 in
+    let space5 = (String.index_from timeA space4 ' ') + 1 in
+    let length = String.length time in
+    let m = String.trim (String.sub time 0 (space1-1)) in
+    let month = GenericUtility.month2int in
+    let d = String.trim (String.sub time space1 (space2-space1)) in
+    let day = string_of_int d in
+    let y = String.trim (String.sub time space3 (length-space3)) in
+    let year = int_of_string y in
+    let hours = int_of_string (String.sub time space2 2) in
+    let minutes = int_of_string (String.sub time (space2+3) 2) in
+    let seconds = int_of_string (String.sub time (space2+6) 2) in
+    { Unix.tm.tm_sec = seconds; Unix.tm.tm_min = minutes; tm_hour = hours; 
+      tm_mday = day; tm_mon = month; tm_year = (year-1900); tm_wday = 0; 
+      tm_yday = 0; tm_isdst = false};;
 end
 
 
@@ -448,16 +470,8 @@ module Followup = struct
       then true else false in
     (*input looks like: Mar 11 12:39:05 2013*)
     let laterTweet tweetA tweetB = 
-      let timeA = tweetA.TweetRecord._time_string_ in
-      let timeB = tweetB.TweetRecord._time_string_ in
-      (*each of the form: "Mar 11 12:39:05 2013"*)
-      let space1A = (String.index_from timeA 0 ' ') + 1 in
-      let space2A = (String.index_from timeA space1 ' ') + 1 in
-      let space3A = (String.index_from timeA space2 ' ') + 1 in
-      let space4A = (String.index_from timeA space3 ' ') + 1 in
-      let space5A = (String.index_from timeA space4 ' ') + 1 in
-      let length = String.length timeA in
-
+      
+      
 
     let isAdHocRT ~line = 
       let j = try

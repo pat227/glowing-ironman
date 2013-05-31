@@ -54,7 +54,7 @@ end*) = struct
       print_int (tmstruct.Unix.tm_mday);
       print_string "]";
     end;;
-
+  (*Needs double checking; unsure twitter abbreviates all these exactly this way*)
   let month2int s =
       match s with
 	  "Jan" -> 0
@@ -69,6 +69,7 @@ end*) = struct
 	| "Oct" -> 9
 	| "Nov" -> 10
 	| "Dec" -> 11
+	  (*this should never happen unless I've bungled an abbreviation*)
 	| _ -> -1;;
 
   let fst (x, _) = x;;

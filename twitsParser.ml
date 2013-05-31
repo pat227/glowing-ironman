@@ -256,7 +256,13 @@ module ParseBZ2Tweets = struct
       let id_i = int_of_string id_s in
       let time_s_proto = Yojson.Basic.to_string time in
       (*"Mon Mar 11 12:39:05 +0000 2013" wastes space, cut it down to: "Mar 11 12:39:05 2013"*)
-      let time_s = (String.sub time_s_proto 5 15) ^ (String.sub time_s_proto 26 5) in
+      let space1 = (String.index_from time_s_proto 0 ' ') + 1 in
+      let space2 = (String.index_from time_s_proto space1 ' ') + 1 in
+      let space3 = (String.index_from time_s_proto space2 ' ') + 1 in
+      let space4 = (String.index_from time_s_proto space3 ' ') + 1 in
+      let space5 = (String.index_from time_s_proto space4 ' ') + 1 in
+      let length = String.length time_s_proto in
+      let time_s = (String.sub time_s_proto space1 (space4-space1-1)) ^ (String.sub time_s_proto space5 (length-space5)) in
       {id = id_i; time_string = time_s}
     in
     let rec consumeBuf ~htbl ~stringbuf ~startpos =

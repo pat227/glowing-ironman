@@ -7,10 +7,84 @@ module TweetRecord : sig
   type t = { _id_ : int; _userid_: int ; _username_: string ; 
 	    _time_string_: string; _text_:string };;
   val compare: t -> t -> int
+  val print_FatTweetRecord : outchan:'a -> trec:t -> unit
+  val printHTable : hashtbl:(t, t) Hashtbl.t -> outfile:string -> unit
 end = struct
   type t = { _id_ : int; _userid_: int ; _username_: string ; 
 	    _time_string_: string; _text_:string };;
+
   let compare t1 t2 = Int64.compare (Int64.of_int t1._id_) (Int64.of_int t2._id_);;
+
+  (*Print to screen*)
+  let print_FatTweetRecord ~outchan ~trec = 
+    begin
+      print_string " tweetid: ";
+      print_string (string_of_int trec._id_);
+      print_string ", ";
+      print_string " userid: ";
+      print_string (string_of_int trec._userid_);
+      print_string ", ";
+      print_string " username: ";
+      print_string trec._username_;
+      print_string ", ";
+      print_string " text: ";
+      print_string trec._text_;
+      print_string " ";
+      print_string trec._time_string_;
+      print_string " ";
+      print_newline ();
+    end;;
+
+  let printHTable ~hashtbl ~outfile = 
+    let outchan = open_out outfile in 
+    (*Makes note of id serving as key, and doesn't print except once while 
+      printing the set to which it is mapped.*)
+    let priorid = ref 0 in
+    let writeFold outchan treckey trecord = 
+      let id = treckey._id_ in
+      if id != !priorid then
+	begin 
+	  priorid := id;
+	  output_string outchan (string_of_int id);
+	  output_string outchan ", ";
+	  output_string outchan (string_of_int treckey._userid_);
+	  output_string outchan ", ";
+	  output_string outchan treckey._username_;
+	  output_string outchan ", ";
+	  output_string outchan treckey._text_;
+	  output_string outchan ", ";
+	  output_string outchan treckey._time_string_;
+	  output_string outchan " -> ";
+	  output_string outchan (string_of_int trecord._id_);
+	  output_string outchan ", ";
+	  output_string outchan (string_of_int trecord._userid_);
+	  output_string outchan ", ";
+	  output_string outchan trecord._username_;
+	  output_string outchan ", ";
+	  output_string outchan trecord._text_;
+	  output_string outchan ", ";
+	  output_string outchan trecord._time_string_;
+	  output_string outchan "\n";
+	end
+      else
+	begin (*42 spaces @ present to accomodate source-tweet id, date*)
+	  output_string outchan "                                          | ";
+	  output_string outchan (string_of_int trecord._id_);
+	  output_string outchan ", ";
+	  output_string outchan (string_of_int trecord._userid_);
+	  output_string outchan ", ";
+	  output_string outchan trecord._username_;
+	  output_string outchan ", ";
+	  output_string outchan trecord._text_;
+	  output_string outchan ", ";
+	  output_string outchan trecord._time_string_;
+	  output_string outchan "\n";
+	end
+    in
+    begin
+      Hashtbl.iter (writeFold outchan) hashtbl;
+      close_out outchan;
+    end;;
 end
 
 
@@ -19,33 +93,11 @@ end
   entire dataset again; this cannot be done for text b/c memory pressure even for a relatively "small" data set
   is enormous even with more fine grained memory management. *)
 module Followup = struct
-
+  let popular_enough = 101;;
   module Tweetset = Set.Make(TweetRecord);;
 
   (*A good amount of this module and the one above share some functions that will be factored out into
     a common dependency to avoid duplication, bloat, etc.*)
-
-  (*Determine more quickly if a line of text has a nested element indicative of being a non-adhoc retweet
-    val isRT : line:string -> int*)
-  let isRT ~line =
-    let regexp_retweet = Str.regexp "retweeted_status" in
-    try Str.search_forward regexp_retweet line 0 with Not_found -> -1;;
-
-  (*Similar but only invoke upon contents of text field within json, not entire json!
-  val isAdHocRT : line:string -> bool*)
-  let isAdHocRT ~line =
-    (*Other possible regexps:  (RT.?\u[a-z0-9]{3,4}.?.?@) or better  (RT[^@]{0,5}@) *)
-    let regexp_retweet = Str.regexp "RT[^@]{0,5}@" in
-    let pos = try Str.search_forward regexp_retweet line 0 with Not_found -> -1 in
-    if pos >=0 then true else false;;
-
-  (*val isFirst : line:string -> bool*)
-  let isFirst ~line = 
-    let regexp_arrow = Str.regexp "->" in
-    let bool = try 
-		 Str.search_forward regexp_arrow line 0 
-      with Not_found -> -1 in
-    if bool >= 0 then true else false;;
 
   (*The older type being recovered from the input file that has less datums*)
   (*type tweet_recordOLD = {id : int; time_string: string;};;*)
@@ -214,7 +266,7 @@ module Followup = struct
 			      FreqMap.add int32listlength (Int32.add (Int32.of_int 1) (FreqMap.find int32listlength map)) map 
 	     with Not_found -> FreqMap.add int32listlength (Int32.of_int 1) map in
 	   match hasarrow with true ->
-	     if listlength > 21 then
+	     if listlength > popular_enough then
 	       let tbl_set = addToTable_Set ~list:accum ~tbl:htbl ~set:set in
 	       let updatedTable = GenericUtility.fst(tbl_set) in
 	       let updatedSet = GenericUtility.snd(tbl_set) in
@@ -354,10 +406,10 @@ module Followup = struct
     in
     helper ~set:setref ~oldHtbl:oldHtbl ~newHtbl:newHtbl;;
 
-  (*val constructNewHtbl :
-    set:Tweetset.t ->
-    oldHtbl:(TweetRecord.t, TweetRecord.t) Hashtbl.t ->
-    newHtbl:(Tweetset.t, Tweetset.elt) Hashtbl.t -> unit *)
+  (*Invoke functions that parse the tweet -> retweet mapping file; finds
+    popular tweets; for each popular tweet retrieves additional datums such
+    as text, userid, username; creates a new hashtable with these additional
+    datums for these popular tweets.*)
   let main ()=
     let infile = Sys.argv.(1) in   (* eg "a bz2 file"*) 
     let outfile = Sys.argv.(2) in   (* eg "histogram.txt"*)
@@ -369,8 +421,73 @@ module Followup = struct
     let newHtbl = constructNewHtbl ~set:fatset ~oldHtbl:oldhtbl ~newHtbl:tweets_HASHtbl_NEW in
     begin
       GenericUtility.print2Afile_Int32Map ~amap:freqmap ~outfile:outfile;
-    end;;    
+      (newHtbl, fatset);
+    end;; 
   
   (*main ();*)
 
+  (*Determine more quickly if a line of text has a nested element indicative of being a non-adhoc retweet
+    val isRT : line:string -> int*)
+  let isRT ~line =
+    let regexp_retweet = Str.regexp "retweeted_status" in
+    try Str.search_forward regexp_retweet line 0 with Not_found -> -1;;
+  
+
+
+  (*Do yet another pass over a compressed bz2 tweets file; grab only those tweets that are adhoc
+    retweets and collect them only if they MIGHT be adhoc retweets of already known popular
+    tweets or retweets, ie, only if RT username matches that of a known user of a known tweet. 
+    Also note that it is easy to recover userids, not just names, from the dataset.*)
+  let parse4AdHocRetweets ~file ~fathtbl =
+    let bz2inchan = openBZ2file ~file:file in
+    (*Similar but only invoke upon contents of text field within json, not entire json!
+      Keeping things simple for now; only consider ad hoc retweets with a single "RT".
+      val isAdHocRT : line:string -> bool*)
+    let sameuserid tweetA tweetB = 
+      if tweetA.TweetRecord._id_ == tweetB.TweetRecord._id_
+      then true else false in
+    (*input looks like: Mar 11 12:39:05 2013*)
+    let laterTweet tweetA tweetB = 
+      let timeA = tweetA.TweetRecord._time_string_ in
+      let timeB = tweetB.TweetRecord._time_string_ in
+      (*each of the form: "Mar 11 12:39:05 2013"*)
+      let space1A = (String.index_from timeA 0 ' ') + 1 in
+      let space2A = (String.index_from timeA space1 ' ') + 1 in
+      let space3A = (String.index_from timeA space2 ' ') + 1 in
+      let space4A = (String.index_from timeA space3 ' ') + 1 in
+      let space5A = (String.index_from timeA space4 ' ') + 1 in
+      let length = String.length timeA in
+
+
+    let isAdHocRT ~line = 
+      let j = try
+		(*print_string "===Parsing line: "; print_string line; print_newline ()*)
+		Yojson.Basic.from_string line;
+	with _ -> (print_string "===Failed to Parse JSON: "; print_string line; print_newline (); `Null)
+      in
+      let text = Yojson.Basic.Util.member "text" j in 
+      (*Other possible regexps:  (RT.?\u[a-z0-9]{3,4}.?.?@) or better  (RT[^@]{0,5}@) *)
+      let regexp_retweet = Str.regexp "RT[^@]{0,9}@" in
+      let pos = try Str.search_forward regexp_retweet text 0 with Not_found -> -1 in
+      let pos2 = try Str.search_forward regexp_retweet text pos with _ -> -1 in
+      match pos, pos2 with
+	-1, -1 -> false (*not an adhoc retweet*)
+      |  _, -1 -> true  (*adhoc retweet we're looking for*)
+      | -1,  _ -> false (*impossible*)
+      |  _,  _ -> false (*too many RT's, hadn't realized many existed of this form*)
+	if pos >=0 then true else false in
+    let rec consumeBuf ~stringbuf ~startpos =
+      let nextbreak = try 
+			String.index_from stringbuf startpos '\n' 
+	with _ -> (print_string "===Consumed 8MB buffer with a prior startpos of: ";
+		   print_string (string_of_int startpos);
+		   print_newline ();
+		   String.length stringbuf) in
+      if nextbreak == (String.length stringbuf) then 
+	startpos
+      else
+	let toconsume = String.sub stringbuf startpos (nextbreak - startpos) in
+	
+
+  
 end

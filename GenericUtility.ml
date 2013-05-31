@@ -55,6 +55,22 @@ end*) = struct
       print_string "]";
     end;;
 
+  let month2int s =
+      match s with
+	  "Jan" -> 0
+	| "Feb" -> 1
+	| "Mar" -> 2
+	| "Apr" -> 3
+	| "May" -> 4
+	| "June" -> 5
+	| "July" -> 6
+	| "Aug" -> 7
+	| "Sept" -> 8
+	| "Oct" -> 9
+	| "Nov" -> 10
+	| "Dec" -> 11
+	| _ -> -1;;
+
   let fst (x, _) = x;;
   let snd (_, x) = x;;
   let fst3 (x, _, _) = x;;

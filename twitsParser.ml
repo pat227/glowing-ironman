@@ -265,6 +265,7 @@ module ParseBZ2Tweets = struct
       let time_s = (String.sub time_s_proto space1 (space4-space1-1)) ^ (String.sub time_s_proto space5 (length-space5)) in
       {id = id_i; time_string = time_s}
     in
+    (*the heart of this function*)
     let rec consumeBuf ~htbl ~stringbuf ~startpos =
       let nextbreak = try 
 			String.index_from stringbuf startpos '\n' 

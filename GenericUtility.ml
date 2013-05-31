@@ -4,6 +4,7 @@ module GenericUtility (*: sig
   val snd : 'a * 'b -> 'b
   val thd : 'a * 'b * 'c -> 'c
   val print2Afile_Int32Map : int32 MAP.t  -> outfile:string -> unit
+  val precedes Unix.tm -> Unix.tm -> bool
 end*) = struct
   (*For anyone who does not have time output as part of 
     the prompt with which to better guage runtimes*)
@@ -98,5 +99,27 @@ end*) = struct
 	| [] -> (close_out outchan; (););
     in
     helper ~list:bindings ~outchan:outchan;;
+
+  (*Does first time struct precede the second?
+    Unix.tm -> Unix.tm -> bool*)
+  let precedes tm1 tm2 = 
+    let seconds = tm1.Unix.tm_sec in
+    let minutes = tm1.Unix.tm_min in 
+    let hours = tm1.Unix.tm_hour in
+    let day = tm1.Unix.tm_mday in
+    let month = tm1.Unix.tm_mon in
+    let year = tm1.Unix.tm_year + 1900 in
+    let seconds2 = tm2.Unix.tm_sec in
+    let minutes2 = tm2.Unix.tm_min in 
+    let hours2 = tm2.Unix.tm_hour in
+    let day2 = tm2.Unix.tm_mday in
+    let month2 = tm2.Unix.tm_mon in
+    let year2 = tm2.Unix.tm_year + 1900 in
+    if year < year2 then true else
+      if month < month2 then true else
+	if day < day2 then true else
+	  if hours < hours2 then true else
+	    if minutes < minutes2 then true else
+	      if seconds < seconds2 then true else false;;
   
 end

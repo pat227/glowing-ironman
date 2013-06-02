@@ -14,7 +14,7 @@ module TweetRecord : sig
   val compare: t -> t -> int
   val print_FatTweetRecord : outchan:'a -> trec:t -> unit
   val printHTable : hashtbl:(t, t) Hashtbl.t -> outfile:string -> unit
-  val tm_fromString : t -> Unix.tm
+  val tm_fromString : string -> Unix.tm
   val sameuserid : t -> t -> bool 
 end = struct
   type t = { _id_ : int; 
@@ -45,10 +45,13 @@ end = struct
       print_string trec._time_string_;
       print_string " ";
       if trec._adhocRTuserID_ > 0 then
-	(print_string (string_of_int trec._adhocRTuserID_);
-	 print_string " ";
-	 print_string trec._adhocRTusername_;)
-      print_newline ();
+	begin
+	  print_string (string_of_int trec._adhocRTuserID_);
+	  print_string " ";
+	  print_string trec._adhocRTusername_;
+	  print_newline ();
+	end
+      else print_newline ();
     end;;
   (*Print to file a hashtable of [new fat] tweetrecords*)
   let printHTable ~hashtbl ~outfile = 
@@ -71,9 +74,12 @@ end = struct
 	  output_string outchan ", ";
 	  output_string outchan treckey._time_string_;
 	  if treckey._adhocRTuserID_ > 0 then
-	    (print_string (string_of_int treckey._adhocRTuserID_);
-	     print_string " ";
-	     print_string treckey._adhocRTusername_;)	  
+	    begin
+	      print_string (string_of_int treckey._adhocRTuserID_);
+	      print_string " ";
+	      print_string treckey._adhocRTusername_;
+	    end
+	  else ();
 	  output_string outchan " -> ";
 	  output_string outchan (string_of_int trecord._id_);
 	  output_string outchan ", ";
@@ -85,9 +91,12 @@ end = struct
 	  output_string outchan ", ";
 	  output_string outchan trecord._time_string_;
 	  if trecord._adhocRTuserID_ > 0 then
-	    (print_string (string_of_int trecord._adhocRTuserID_);
-	     print_string " ";
-	     print_string trecord._adhocRTusername_;)
+	    begin
+	      print_string (string_of_int trecord._adhocRTuserID_);
+	      print_string " ";
+	      print_string trecord._adhocRTusername_;
+	    end
+	  else ();
 	  output_string outchan "\n";
 	end
       else
@@ -103,9 +112,12 @@ end = struct
 	  output_string outchan ", ";
 	  output_string outchan trecord._time_string_;
 	  if trecord._adhocRTuserID_ > 0 then
-	    (print_string (string_of_int trecord._adhocRTuserID_);
-	     print_string " ";
-	     print_string trecord._adhocRTusername_;)
+	    begin
+	      print_string (string_of_int trecord._adhocRTuserID_);
+	      print_string " ";
+	      print_string trecord._adhocRTusername_;
+	    end
+	  else ();
 	  output_string outchan "\n";
 	end
     in
@@ -115,7 +127,7 @@ end = struct
     end;;
 
   (*Convert the heretofore string ripped from the json into a unix tm struct.
-    val tm_ofTweet : tweetrec:t -> Unix.tm *)
+    val tm_ofTweet : string -> Unix.tm *)
   let tm_fromString timestring = 
     (*of the form: "Mar 11 12:39:05 2013"*)
     let space1 = (String.index_from timestring 0 ' ') + 1 in
@@ -136,8 +148,8 @@ end = struct
       tm_yday = 0; tm_isdst = false};;
 
   (*Determine if two tweet records have same id*)
-  let sameID tweetA tweetB = 
-    if tweetA.TweetRecord._id_ == tweetB.TweetRecord._id_
+  let sameuserid tweetA tweetB = 
+    if tweetA._id_ == tweetB._id_
     then true else false;;
 
 end
@@ -150,8 +162,8 @@ end
 module Followup = struct
   let popular_enough = 51;;
   module Tweetset = Set.Make(TweetRecord);;
-  module FatSet = Set.Make(TweetSet.elt);;
-  module AdHocFatSet = Set.Make(TweetSet.elt);;
+  module FatSet = Set.Make(Tweetset);;
+  module AdHocFatSet = Set.Make(TweetRecord);;
   (*A good amount of this module and the one above share some functions that will be factored out into
     a common dependency to avoid duplication, bloat, etc.*)
 
@@ -264,8 +276,8 @@ module Followup = struct
       _userid_ = 0 ; 
       _username_ = ""; 
       _text_ = ""; 
-      _adhocRTuserID_ = 0
-      _adhocRTusername_ = "" };; 
+      _adhocRTuserID_ = 0;
+      _adhocRTusername_ = ""; };; 
   
   (*(Parsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)))
     val createTrecord :
@@ -277,7 +289,7 @@ module Followup = struct
     ?adhocusername:Yojson.Basic.json ->
     text:Yojson.Basic.json -> TweetRecord.t
   *)
-  let createTrecord ~id ~time ~userid ~username ?(adhocuserid = 0) ?(adhocusername = "") ~text =
+  let createTrecord ~id ~time ~userid ~username ?adhocuserid ?adhocusername ~text =
     let id_s = Yojson.Basic.to_string id in
     let id_i = int_of_string id_s in
     let time_s_proto = Yojson.Basic.to_string time in
@@ -287,15 +299,43 @@ module Followup = struct
     let userid = int_of_string userid_s in
     let username = Yojson.Basic.to_string username in
     let text = Yojson.Basic.to_string text in
-    let userid_adhoc = int_of_string (Yojson.Basic.to_string adhocuserid) in
-    let username_adhoc = Yojson.Basic.to_string adhocusername in
-    { TweetRecord._id_ = id_i; 
-      _time_string_ = time; 
-      _userid_ = userid ; 
-      _username_ = username; 
-      _text_ = text;
-      _adhocRTuserID_ = userid_adhoc
-      _adhocRTusername_ = username_adhoc };;
+    match adhocuserid, adhocusername with
+      None, None -> let userid_adhoc = 0 in 
+		    let username_adhoc = "" in
+		    { TweetRecord._id_ = id_i; 
+		      _time_string_ = time; 
+		      _userid_ = userid ; 
+		      _username_ = username; 
+		      _text_ = text;
+		      _adhocRTuserID_ = userid_adhoc;
+		      _adhocRTusername_ = username_adhoc }
+    | Some x, Some y -> let userid_adhoc = int_of_string (Yojson.Basic.to_string x) in
+			let username_adhoc = Yojson.Basic.to_string y in
+			{ TweetRecord._id_ = id_i; 
+			  _time_string_ = time; 
+			  _userid_ = userid ; 
+			  _username_ = username; 
+			  _text_ = text;
+			  _adhocRTuserID_ = userid_adhoc;
+			  _adhocRTusername_ = username_adhoc }
+    | None, Some y -> let userid_adhoc = 0 in
+		      let username_adhoc = Yojson.Basic.to_string y in
+		      { TweetRecord._id_ = id_i; 
+			_time_string_ = time; 
+			_userid_ = userid ; 
+			_username_ = username; 
+			_text_ = text;
+			_adhocRTuserID_ = userid_adhoc;
+			_adhocRTusername_ = username_adhoc }
+    | Some x, None -> let userid_adhoc = int_of_string (Yojson.Basic.to_string x) in
+		      let username_adhoc = "" in 
+		      { TweetRecord._id_ = id_i; 
+			_time_string_ = time; 
+			_userid_ = userid ; 
+			_username_ = username; 
+			_text_ = text;
+			_adhocRTuserID_ = userid_adhoc;
+			_adhocRTusername_ = username_adhoc };;
 
   (*Add a list to a table, where head of list is the key, and rest are mappings from key
     val addToTable_Set :
@@ -382,11 +422,12 @@ module Followup = struct
   *)
   let truncatedTweet ~(tweet:TweetRecord.t) : TweetRecord.t = 
     { TweetRecord._id_ = tweet.TweetRecord._id_; 
-      _time_string_ = tweet._time_string_; 
+      _time_string_ = tweet.TweetRecord._time_string_; 
       _userid_ = 0 ; 
       _username_ = ""; 
       _text_ = "";
-      _adhocRTuserID_ = 0; };;
+      _adhocRTuserID_ = 0;
+      _adhocRTusername_ = "";};;
       
   (*Given a hashtable (reconstructed from a file & whose contents were the output 
     of the first module, ParseBZ2Tweets) and a set (containing records within the 
@@ -419,14 +460,15 @@ module Followup = struct
 	let toconsume = String.sub stringbuf startpos (nextbreak - startpos) in
 	let tuple = getRetweetsExtraInfo ~line:toconsume in
 	match tuple with 
-	  (*(Parsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)))*)
 	  (RetweetParsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)) -> 
-	    let sourcetweet = createTrecord ~id:rid ~time:rtime ~userid:ruserid ~username:rusername ~text:rtext in
-	    let retweet = createTrecord ~id:id ~time:time ~userid:userid ~username:username ~text:text in
+	    let sourcetweet = createTrecord ~id:rid ~time:rtime ~userid:ruserid ~username:rusername ~text:rtext ?adhocuserid:None ?adhocusername:None in
+	    let retweet = createTrecord ~id:id ~time:time ~userid:userid ~username:username ~text:text ?adhocuserid:None ?adhocusername:None in
 	    let updatedSet = updateSet ~set:set ~tweet:sourcetweet in
 	    let updatedSet2 = updateSet ~set:updatedSet ~tweet:retweet in
 	    consumeBuf ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~set:updatedSet2;
 	| NoParse -> 
+	  consumeBuf ~set:set ~stringbuf:stringbuf ~startpos:(nextbreak+1)
+	| AdHocRetweetParsed (id, time, userid, username, text, uid_after_rt_at, uname_after_rt_at) -> 
 	  consumeBuf ~set:set ~stringbuf:stringbuf ~startpos:(nextbreak+1)
     in
     let rec helper ~set ~bz2inchan ~chunksize ~leftover = 
@@ -513,6 +555,27 @@ module Followup = struct
     let regexp_retweet = Str.regexp "retweeted_status" in
     try Str.search_forward regexp_retweet line 0 with Not_found -> -1;;
   
+  (*this function likely has a better more direct alternative*)
+  let getUID_fromAdhocRT_mention ~tweetjson = 
+    (*Get several entities mentioned in tweet, including users, hashtags, urls*)
+    let entities = Yojson.Basic.Util.filter_member "entities" [tweetjson] in
+    (*Get list of assoc lists for each user entity mentioned in tweet*)
+    let user_mentions = Yojson.Basic.Util.filter_member "user_mentions" entities in
+    (*Get only assoc list within list for our one user from RT @ username*)
+    let unwrapped = Yojson.Basic.Util.filter_list user_mentions in
+    (*get the only entry in the assoc list*)
+    let unwrapped2 = List.nth unwrapped 0 in
+    (*Extract the only list in that assoc list*)
+    let unwrapped3 = Yojson.Basic.Util.filter_assoc unwrapped2 in
+    (*Get 5 tuples of the assoc list: keys are: screen_name, name, id, id_str, indices*)
+    let unwrapped4 = List.nth unwrapped3 0 in 
+    (*Get 3rd element of list, the userid as int*)
+    let useridjson = List.nth unwrapped4 2 in 
+    (*Convert from json to int*)
+    let userid_adhoc = (*Yojson.Basic.Util.to_int*) (snd useridjson) in
+    (*also get the RT @ username *)
+    let username_adhoc = (*Yojson.Basic.Util.to_int*) (snd (List.nth unwrapped4 0)) in
+    (userid_adhoc, username_adhoc);;
 
 
   (*Do another pass over a compressed bz2 tweets file; gather all those tweets that are adhoc
@@ -520,28 +583,6 @@ module Followup = struct
     tweets or retweets or still other adhoc retweets.*)
   let parse4AdHocRetweets ~file ~adhocset ~chunksize =
     let bz2inchan = openBZ2file ~file:file in
-    (*this function likely has a better more direct alternative*)
-    let getUID_fromAdhocRT_mention ~tweetjson = 
-      (*Get several entities mentioned in tweet, including users, hashtags, urls*)
-      let entities = Yojson.Basic.Util.filter_member "entities" [j] in
-      (*Get list of assoc lists for each user entity mentioned in tweet*)
-      let user_mentions = Yojson.Basic.Util.filter_member "user_mentions" entities in
-      (*Get only assoc list within list for our one user from RT @ username*)
-      let unwrapped = Yojson.Basic.Util.filter_list user_mentions in
-      (*get the only entry in the assoc list*)
-      let unwrapped2 = List.nth unwrapped 0 in
-      (*Extract the only list in that assoc list*)
-      let unwrapped3 = Yojson.Basic.Util.filter_assoc unwrapped2 in
-      (*Get 5 tuples of the assoc list: keys are: screen_name, name, id, id_str, indices*)
-      let unwrapped4 = List.nth unwrapped3 0 in 
-      (*Get 3rd element of list, the userid as int*)
-      let useridjson = List.nth unwrapped4 2 in 
-      (*Convert from json to int*)
-      let userid_adhoc = Yojson.Basic.Util.to_int (snd useridjson) in
-      (*also get the RT @ username *)
-      let username_adhoc = Yojson.Basic.Util.to_int (snd (List.nth unwrapped4 0)) in
-      (userid_adhoc, username_adhoc)
-    in          
     (*Invokes regexp upon contents of text field only within json, not the entire json!
       Keeping things simple for now; only consider ad hoc retweets with a single "RT".
       val isAdHocRT : line:string -> bool*)
@@ -552,11 +593,12 @@ module Followup = struct
 	with _ -> (print_string "===Failed to Parse JSON: "; print_string line; print_newline (); `Null)
       in
       let text = Yojson.Basic.Util.member "text" j in 
+      let textstring = Yojson.Basic.Util.to_string text in
       (*Other possible regexp:  (RT.?\u[a-z0-9]*.?@) or better  (RT[^@]{0,5}@)  but {} not recognized by Str
 	or "RT[^@]@" also works*)
       let regexp_retweet = Str.regexp "\\(\\(RT[^@]@\\)\\|\\(RT[^@][^@]@\\)\\)" in
-      let pos = try Str.search_forward regexp_retweet text 0 with _ -> -1 in
-      let pos2 = try Str.search_forward regexp_retweet text (pos+1) with _ -> -1 in
+      let pos = try Str.search_forward regexp_retweet textstring 0 with _ -> -1 in
+      let pos2 = try Str.search_forward regexp_retweet textstring (pos+1) with _ -> -1 in
       match pos, pos2 with
 	-1, -1 -> NoParse (*not an adhoc retweet*)
       | -1,  _ -> NoParse (*impossible*)
@@ -571,7 +613,6 @@ module Followup = struct
 	let userj = Yojson.Basic.Util.member "user" j in 
 	let userid = Yojson.Basic.Util.member "id" userj in 
 	let username = Yojson.Basic.Util.member "screen_name" userj in
-	let text = Yojson.Basic.Util.member "text" j in 
 	(AdHocRetweetParsed (id, time, userid, username, text, uid_after_rt_at, uname_after_rt_at)) in
     (*the heart of this function: given a tweet, if it is an adhoc RT with only one "RT @ username"
       within the text, add to set for later analysis.*)
@@ -593,19 +634,21 @@ module Followup = struct
 	      ~adhocusername:uname_after_rt_at ~text:text in
 	    let updatedAdHocSet = AdHocFatSet.add adhocrt adhocset in
 	    consumeBuf ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~adhocset:updatedAdHocSet
+	| RetweetParsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext) -> 
+	  consumeBuf ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~adhocset:adhocset 
 	| NoParse -> consumeBuf ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~adhocset:adhocset in
     let rec helper ~set ~bz2inchan ~chunksize ~leftover = 
       let nextchunk = input_next_x_chars_improved ~bzinchan:bz2inchan ~howmanymore:chunksize in
       match nextchunk with
 	(Good, toconsume) ->  
 	  let merged = leftover ^ toconsume in 
-	  let t = consumeBuf ~set:set ~stringbuf:merged ~startpos:0 in
+	  let t = consumeBuf ~adhocset:set ~stringbuf:merged ~startpos:0 in
 	  let updatedset = GenericUtility.fst t in
 	  let leftoverstart = GenericUtility.snd t in
 	  let leftover = String.sub merged leftoverstart ((String.length merged) - leftoverstart) in	    
 	  helper ~set:updatedset ~bz2inchan:bz2inchan ~chunksize:chunksize ~leftover:leftover;
       | (_, toconsume) -> 
-	let t = consumeBuf ~set:set ~stringbuf:toconsume ~startpos:0 in
+	let t = consumeBuf ~adhocset:set ~stringbuf:toconsume ~startpos:0 in
 	let updatedset = GenericUtility.fst t in
 	begin
 	  print_string "===Finished creating adhoc tweets set===";
@@ -620,20 +663,21 @@ module Followup = struct
   let getALLRetweets ~line = 
     let j = try      
 	      (*print_string "===Parsing line: "; print_string line; print_newline ()*)
-	      Yojson.Safe.from_string line;
+	      Yojson.Basic.from_string line;
       with _ -> (print_string "===Failed to Parse JSON: "; print_string line; print_newline (); `Null)
     in
     let retweet_status = try 
-			   Yojson.Basic.Util.member "retweeted_status" (Yojson.Safe.to_basic j) 
+			   Yojson.Basic.Util.member "retweeted_status" j
       with _ -> ((*print_string "===Failed to Parse B=== "; print_newline ();*) `Null)
     in
     match retweet_status with
       `Null ->  (let text = Yojson.Basic.Util.member "text" j in 
+		 let textstring = Yojson.Basic.Util.to_string text in
 		 (*Other possible regexp:  (RT.?\u[a-z0-9]*.?@) or better  (RT[^@]{0,5}@)  but {} not recognized by Str
 		   or "RT[^@]@" also works*)
 		 let regexp_retweet = Str.regexp "\\(\\(RT[^@]@\\)\\|\\(RT[^@][^@]@\\)\\)" in
-		 let pos = try Str.search_forward regexp_retweet text 0 with _ -> -1 in
-		 let pos2 = try Str.search_forward regexp_retweet text (pos+1) with _ -> -1 in
+		 let pos = try Str.search_forward regexp_retweet textstring 0 with _ -> -1 in
+		 let pos2 = try Str.search_forward regexp_retweet textstring (pos+1) with _ -> -1 in
 		 match pos, pos2 with
 		   -1, -1 -> NoParse (*not an adhoc retweet*)
 		 | -1,  _ -> NoParse (*impossible*)
@@ -650,15 +694,14 @@ module Followup = struct
 		   let username = Yojson.Basic.Util.member "screen_name" userj in
 		   let text = Yojson.Basic.Util.member "text" j in 
 		   (AdHocRetweetParsed (id, time, userid, username, text, uid_after_rt_at, uname_after_rt_at)))
-      | _ -> (let jbasic = Yojson.Safe.to_basic j in
-	      let id = Yojson.Basic.Util.member "id" jbasic in
+      | _ -> (let id = Yojson.Basic.Util.member "id" j in
 	      let rid = Yojson.Basic.Util.member "id" retweet_status in
-	      let time = Yojson.Basic.Util.member "created_at" jbasic in
+	      let time = Yojson.Basic.Util.member "created_at" j in
 	      let rtime = Yojson.Basic.Util.member "created_at" retweet_status in
-	      let userj = Yojson.Basic.Util.member "user" jbasic in 
+	      let userj = Yojson.Basic.Util.member "user" j in 
 	      let userid = Yojson.Basic.Util.member "id" userj in 
 	      let username = Yojson.Basic.Util.member "screen_name" userj in
-	      let text = Yojson.Basic.Util.member "text" jbasic in 
+	      let text = Yojson.Basic.Util.member "text" j in 
 	      let ruserj = Yojson.Basic.Util.member "user" retweet_status in
 	      let ruserid = Yojson.Basic.Util.member "id" ruserj in
 	      let rusername = Yojson.Basic.Util.member "screen_name" ruserj in
@@ -683,17 +726,17 @@ module Followup = struct
 		   print_newline ();
 		   String.length stringbuf) in
       if nextbreak == (String.length stringbuf) then 
-	(set, startpos, adhocset)
+	(fatset, startpos, adhocset)
       else
 	let toconsume = String.sub stringbuf startpos (nextbreak - startpos) in
 	let tuple = getALLRetweets ~line:toconsume in
 	match tuple with 
 	  (RetweetParsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)) -> 
-	    let sourcetweet = createTrecord ~id:rid ~time:rtime ~userid:ruserid ~username:rusername ~text:rtext in
-	    let retweet = createTrecord ~id:id ~time:time ~userid:userid ~username:username ~text:text in
-	    let updatedSet = updateSet ~set:fatset ~tweet:sourcetweet in
-	    let updatedSet2 = updateSet ~set:updatedSet ~tweet:retweet in
-	    consumeBuf ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~fatset:updatedSet2; ~adhocset:adhocset
+	    let sourcetweet = createTrecord ~id:rid ~time:rtime ~userid:ruserid ~username:rusername ~text:rtext ?adhocuserid:None ?adhocusername:None in
+	    let retweet = createTrecord ~id:id ~time:time ~userid:userid ~username:username ~text:text ?adhocuserid:None ?adhocusername:None in
+	    let updatedSet = updateFatSet ~set:fatset ~tweet:sourcetweet in
+	    let updatedSet2 = updateFatSet ~set:updatedSet ~tweet:retweet in
+	    consumeBuf ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~fatset:updatedSet2 ~adhocset:adhocset
 	| (AdHocRetweetParsed (id, time, userid, username, text, uid_after_rt_at, uname_after_rt_at)) -> 
 	    let adhocrt = createTrecord ~id:id ~time:time ~userid:userid 
 	      ~username:username ~adhocuserid:uid_after_rt_at 
@@ -717,10 +760,11 @@ module Followup = struct
 	    ~chunksize:chunksize ~leftover:leftover;
       | (_, toconsume) -> 
 	let t = consumeBuf ~fatset:fatset ~adhocset:adhocset ~stringbuf:toconsume ~startpos:0 in
-	let updatedset = GenericUtility.fst t in
+	let updatedFatSet = GenericUtility.fst3 t in
+	let updatedAdHocSet = GenericUtility.thd3 t in
 	begin
 	  print_string "===Finished creating popular tweets set & adhoc set===";
-	  updatedset;
+	  (updatedFatSet, updatedAdHocSet);
 	end
     in
     helper ~fatset:fatset ~adhocset:adhocset ~bz2inchan:bz2inchan ~chunksize:8388608 ~leftover:"";;

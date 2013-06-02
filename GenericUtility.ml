@@ -4,8 +4,8 @@ module GenericUtility (*: sig
   val snd : 'a * 'b -> 'b
   val thd : 'a * 'b * 'c -> 'c
   val print2Afile_Int32Map : int32 MAP.t  -> outfile:string -> unit
-  val precedes Unix.tm -> Unix.tm -> bool
-end*) = struct
+  val precedes: Unix.tm -> Unix.tm -> bool
+end *) = struct
   (*For anyone who does not have time output as part of 
     the prompt with which to better guage runtimes*)
   let print_GMTime () = 

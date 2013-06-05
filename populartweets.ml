@@ -1,5 +1,6 @@
 (*This short module needed to provide an ordered type so we can make sets and maps in next module;
   also defines a few useful operations on the records.*)
+open GenericUtility;;
 module TweetRecord : sig 
   type t = { _id_ : int;            (*unique tweet id as before*) 
 	     _userid_: int ;        (*user id of the tweeter*)
@@ -584,9 +585,9 @@ module Followup = struct
       let pos2 = try Str.search_forward regexp_retweet textstring (pos+1) with _ -> -1 in
       match pos, pos2 with
 	-1, -1 -> NoParse (*not an adhoc retweet*)
-      | -1,  _ -> NoParse (*impossible*)
-      |  _,  _ -> NoParse (*too many RT's, ignore*)
-      |  _, -1 -> (*possible adhoc retweet we're looking for*)
+      | -1,  pos2 when pos2 != -1 -> NoParse (*impossible*)
+      |  pos1, pos2 when pos1 != -1 && pos2 != -1 -> NoParse (*too many RT's, ignore*)
+      |  pos1, -1 when pos1 != -1 -> (*possible adhoc retweet we're looking for*)
 	(*make a record out it; store it; later we'll try to find where it might fit*)
 	let after_rt_at_tuple = getUID_fromAdhocRT_mention ~tweetjson:j in
 	let uid_after_rt_at = GenericUtility.fst after_rt_at_tuple in
@@ -665,9 +666,9 @@ module Followup = struct
 		 let pos2 = try Str.search_forward regexp_retweet textstring (pos+1) with _ -> -1 in
 		 match pos, pos2 with
 		   -1, -1 -> NoParse (*not an adhoc retweet*)
-		 | -1,  _ -> NoParse (*impossible*)
-		 |  _,  _ -> NoParse (*too many RT's, ignore*)
-		 |  _, -1 -> (*possible adhoc retweet we're looking for*)
+		 | -1,  pos2 when pos2 != -1 -> NoParse (*impossible*)
+		 |  pos1, pos2 when pos1 != -1 && pos2 != -1 -> NoParse (*too many RT @ usernames*)
+		 |  pos1, -1 when pos1 != -1 -> (*possible adhoc retweet we're looking for*)
 		   (*make a record out it; store it; later we'll try to find where it might fit*)
 		   let after_rt_at_tuple = getUID_fromAdhocRT_mention ~tweetjson:j in
 		   let uid_after_rt_at = GenericUtility.fst after_rt_at_tuple in
@@ -765,10 +766,10 @@ if (FatSet.mem toreplace set) then
     these including full text, tweetid, userid, username, and RT@username & id.
     val submain : unit -> unit * FatSet.t * AdHocFatSet.t
   *)  
-  let submain ~infile ~outfile =
-    let triple = parseTable4PopularTweets ~file:infile in
+  let submain ~infile ~outfile ~oldhtblfile =
+    let triple = parseTable4PopularTweets ~file:oldhtblfile in
     let oldhtbl = GenericUtility.fst3 triple in
-    let thinset = GenericUtility.snd3 triple in
+    (*let thinset = GenericUtility.snd3 triple in*)
     let freqmap = GenericUtility.thd3 triple in
     let tuple = fillFatSet_And_AdhHocTweetSet ~adhocset:AdHocFatSet.empty ~fatset:FatSet.empty ~compressedfile:infile in
     let fattweetset = GenericUtility.fst tuple in
@@ -853,10 +854,11 @@ if (FatSet.mem toreplace set) then
     substring or other text matching scheme to eliminate false positives.
     val main : unit -> unit *)
   let main () =
-    let infile = Sys.argv.(1) in   (* eg "a bz2 file"*) 
-    let outfile = Sys.argv.(2) in   (* eg "histogram.txt"*)
-    let triple = submain ~infile:infile ~outfile:outfile in
-    let htbl = GenericUtility.fst3 triple in
+    let archive = Sys.argv.(1) in   (* eg "a bz2 file"*)
+    let oldhtbl = Sys.argv.(2) in   (* eg "output.txt" from older module run*) 
+    let outfile = Sys.argv.(3) in   (* eg "histogram.txt"*)
+    let triple = submain ~infile:archive ~oldhtblfile:oldhtbl ~outfile:outfile in
+    (*let htbl = GenericUtility.fst3 triple in*)
     let tweets = GenericUtility.snd3 triple in 
     let adhocset = GenericUtility.thd3 triple in 
     begin
@@ -866,7 +868,7 @@ if (FatSet.mem toreplace set) then
     end;;
   
   
-(*main ();*)
+  main ();;
   
 
 

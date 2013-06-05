@@ -2,7 +2,9 @@ module GenericUtility (*: sig
   val print_GMTime : unit -> unit
   val fst : 'a * 'b -> 'a
   val snd : 'a * 'b -> 'b
-  val thd : 'a * 'b * 'c -> 'c
+  val fst3 : 'a * 'b * 'c -> 'a
+  val snd3 : 'a * 'b * 'c -> 'b
+  val thd3 : 'a * 'b * 'c -> 'c
   val print2Afile_Int32Map : int32 MAP.t  -> outfile:string -> unit
   val precedes: Unix.tm -> Unix.tm -> bool
 end *) = struct

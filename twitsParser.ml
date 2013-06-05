@@ -24,7 +24,7 @@
   Memory usage hit ~35% @ ~18 minutes into run; ~42.7% @ ~22 minutes; ~53% @ ~29 minutes; ~81% @ ~43 minutes;
   FINISHED (Function time) [19:48:45 | Wed May 15]  (Command line time) [15:48:46|Wed May 15]
 *)
-
+(*
 module GenericUtility : sig
   val print_GMTime : unit -> unit
   val fst : 'a * 'b -> 'a 
@@ -84,7 +84,8 @@ end = struct
   let snd (_, x) = x;;
 
 end
-
+*)
+open GenericUtility;;
 (*Tweet-specific functions go here*)
 module ParseBZ2Tweets = struct
 
@@ -333,5 +334,5 @@ module ParseBZ2Tweets = struct
       exit 0;
     end;;
 
-  (*main ();;*)
+  main ();;
 end

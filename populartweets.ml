@@ -1,8 +1,5 @@
-(*====================untested code here down===================================*)
-
-(*This short module needed to provide an ordered type so we can make sets and maps in next module.
-  Mutable fields required to allow us to fill in table with missing datums from second pass 
-  over compressed archive file; user id as string can be used at first to spot confirm correctness by inspection. *)
+(*This short module needed to provide an ordered type so we can make sets and maps in next module;
+  also defines a few useful operations on the records.*)
 module TweetRecord : sig 
   type t = { _id_ : int;            (*unique tweet id as before*) 
 	     _userid_: int ;        (*user id of the tweeter*)
@@ -15,7 +12,6 @@ module TweetRecord : sig
   val print_FatTweetRecord : outchan:'a -> trec:t -> unit
   val printHTable : hashtbl:(t, t) Hashtbl.t -> outfile:string -> unit
   val tm_fromString : string -> Unix.tm
-  val sameuserid : t -> t -> bool 
 end = struct
   type t = { _id_ : int; 
 	     _userid_: int ; 
@@ -53,6 +49,7 @@ end = struct
 	end
       else print_newline ();
     end;;
+
   (*Print to file a hashtable of [new fat] tweetrecords*)
   let printHTable ~hashtbl ~outfile = 
     let outchan = open_out outfile in 
@@ -146,11 +143,6 @@ end = struct
     { Unix.tm_sec = seconds; tm_min = minutes; tm_hour = hours; 
       tm_mday = day; tm_mon = month; tm_year = (year-1900); tm_wday = 0; 
       tm_yday = 0; tm_isdst = false};;
-
-  (*Determine if two tweet records have same id*)
-  let sameuserid tweetA tweetB = 
-    if tweetA._id_ == tweetB._id_
-    then true else false;;
 
 end
 
@@ -773,9 +765,7 @@ if (FatSet.mem toreplace set) then
     these including full text, tweetid, userid, username, and RT@username & id.
     val submain : unit -> unit * FatSet.t * AdHocFatSet.t
   *)  
-  let submain () =
-    let infile = Sys.argv.(1) in   (* eg "a bz2 file"*) 
-    let outfile = Sys.argv.(2) in   (* eg "histogram.txt"*)
+  let submain ~infile ~outfile =
     let triple = parseTable4PopularTweets ~file:infile in
     let oldhtbl = GenericUtility.fst3 triple in
     let thinset = GenericUtility.snd3 triple in
@@ -863,12 +853,16 @@ if (FatSet.mem toreplace set) then
     substring or other text matching scheme to eliminate false positives.
     val main : unit -> unit *)
   let main () =
-    let triple = submain () in
+    let infile = Sys.argv.(1) in   (* eg "a bz2 file"*) 
+    let outfile = Sys.argv.(2) in   (* eg "histogram.txt"*)
+    let triple = submain ~infile:infile ~outfile:outfile in
     let htbl = GenericUtility.fst3 triple in
     let tweets = GenericUtility.snd3 triple in 
     let adhocset = GenericUtility.thd3 triple in 
     begin
       print_string "===Submain () worked...attempting to find flows...";
+      let candidatemappings = constructCandidateFlows ~fatset:tweets ~adhocset:adhocset in
+      TweetRecord.printHTable ~hashtbl:candidatemappings ~outfile:"firstrun.txt";
     end;;
   
   

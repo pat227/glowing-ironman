@@ -8,7 +8,7 @@ module TweetRecord : sig
 	     _userid_: int ;        (*user id of the tweeter*)
 	     _username_: string ;   (*username of the tweeter*)
 	     _time_string_: string; (*ripped from twitter json*)
-	     _text_:string;         (*tweet text in full*)
+	     _text_: string;        (*tweet text in full*)
 	     _adhocRTuserID_ : int; (*unique userID of username within text following "RT @", if present, else zero*)
 	     _adhocRTusername_ : string };; (*String username more easily recognizable*)
   val compare: t -> t -> int
@@ -21,7 +21,7 @@ end = struct
 	     _userid_: int ; 
 	     _username_: string ; 
 	     _time_string_: string; 
-	     _text_:string;
+	     _text_: string;
 	     _adhocRTuserID_ : int;
 	     _adhocRTusername_ : string };;
 
@@ -155,14 +155,17 @@ end = struct
 end
 
 
-(*Reconstruct some of the table created above, from a file--should have a manner of doing so live as well--and
-  then fill in tweet text, user ids and names, etc, and try to find flows via adhoc retweets by examining the
-  entire dataset again; this cannot be done for text b/c memory pressure even for a relatively "small" data set
-  is enormous even with more fine grained memory management. *)
+(*Reconstruct some of the hash table created from first pass from a file--should have a manner of doing so 
+  live as well--and then fill in tweet text, user ids and names, etc, and try to find flows via adhoc retweets 
+  by examining the entire dataset again; this cannot be done for text b/c memory pressure even for a relatively
+  "small" data set is enormous even with more fine grained memory management. *)
 module Followup = struct
   let popular_enough = 51;;
+  (*Set of old tweets, lacking text, etc*)
   module Tweetset = Set.Make(TweetRecord);;
-  module FatSet = Set.Make(Tweetset);;
+  (*Set of tweets with text, etc, aka "fat" records*)
+  module FatSet = Set.Make(TweetRecord);;
+  (*Set of adhoc tweets with text, etc, aka fat adhoc records*)
   module AdHocFatSet = Set.Make(TweetRecord);;
   (*A good amount of this module and the one above share some functions that will be factored out into
     a common dependency to avoid duplication, bloat, etc.*)
@@ -429,6 +432,15 @@ module Followup = struct
       _adhocRTuserID_ = 0;
       _adhocRTusername_ = "";};;
       
+  (*val updateSet : set:Tweetset.t -> tweet:Tweetset.elt -> Tweetset.t*)
+  let updateSet ~set:set ~tweet:tweet = 
+    let toreplace = truncatedTweet ~tweet:tweet in 
+    if (Tweetset.mem toreplace set) then
+      let newset = Tweetset.remove toreplace set in
+      Tweetset.add tweet newset
+    else (*Must not have been popular tweet/retweet, so ignore it*)
+      set;;
+
   (*Given a hashtable (reconstructed from a file & whose contents were the output 
     of the first module, ParseBZ2Tweets) and a set (containing records within the 
     hashtable) go back to the compressed archive and 1) update the set entries
@@ -440,13 +452,6 @@ module Followup = struct
     val fillSet : set:Tweetset.t -> compressedfile:string -> Tweetset.t   *)
   let fillSet ~set ~compressedfile =
     let bz2inchan = openBZ2file ~file:compressedfile in
-    let updateSet ~set:set ~tweet:tweet = 
-      let toreplace = truncatedTweet ~tweet:tweet in 
-      if (Tweetset.mem toreplace set) then
-	let newset = Tweetset.remove toreplace set in
-	Tweetset.add tweet newset
-      else (*Must not have been popular tweet/retweet, so ignore it*)
-	set in
     let rec consumeBuf ~set ~stringbuf ~startpos =
       let nextbreak = try 
 			String.index_from stringbuf startpos '\n' 
@@ -529,33 +534,16 @@ module Followup = struct
     in
     helper ~set:setref ~oldHtbl:oldHtbl ~newHtbl:newHtbl;;
 
-  (*Invoke functions that parse the tweet -> retweet mapping file; finds
-    popular tweets; for each popular tweet retrieves additional datums such
-    as text, userid, username; creates a new hashtable with these additional
-    datums for these popular tweets, creating a "fat set".*)
-  let main ()=
-    let infile = Sys.argv.(1) in   (* eg "a bz2 file"*) 
-    let outfile = Sys.argv.(2) in   (* eg "histogram.txt"*)
-    let triple = parseTable4PopularTweets ~file:infile in
-    let oldhtbl = GenericUtility.fst3 triple in
-    let thinset = GenericUtility.snd3 triple in
-    let freqmap = GenericUtility.thd3 triple in
-    let fatset = fillSet ~set:thinset ~compressedfile:infile in
-    let newHtbl = constructNewHtbl ~set:fatset ~oldHtbl:oldhtbl ~newHtbl:tweets_HASHtbl_NEW in
-    begin
-      GenericUtility.print2Afile_Int32Map ~amap:freqmap ~outfile:outfile;
-      (newHtbl, fatset);
-    end;; 
-  
-  (*main ();*)
-
   (*Determine more quickly if a line of text has a nested element indicative of being a non-adhoc retweet
     val isRT : line:string -> int*)
   let isRT ~line =
     let regexp_retweet = Str.regexp "retweeted_status" in
     try Str.search_forward regexp_retweet line 0 with Not_found -> -1;;
   
-  (*this function likely has a better more direct alternative*)
+  (*this function likely has a better more direct alternative
+    val getUID_fromAdhocRT_mention :
+    tweetjson:Yojson.Basic.json -> Yojson.Basic.json * Yojson.Basic.json
+  *)
   let getUID_fromAdhocRT_mention ~tweetjson = 
     (*Get several entities mentioned in tweet, including users, hashtags, urls*)
     let entities = Yojson.Basic.Util.filter_member "entities" [tweetjson] in
@@ -580,7 +568,10 @@ module Followup = struct
 
   (*Do another pass over a compressed bz2 tweets file; gather all those tweets that are adhoc
     retweets; later try to identify which MIGHT be adhoc retweets of already known popular
-    tweets or retweets or still other adhoc retweets.*)
+    tweets or retweets or still other adhoc retweets.
+    val parse4AdHocRetweets :
+    file:string -> adhocset:AdHocFatSet.t -> chunksize:int -> AdHocFatSet.t
+*)
   let parse4AdHocRetweets ~file ~adhocset ~chunksize =
     let bz2inchan = openBZ2file ~file:file in
     (*Invokes regexp upon contents of text field only within json, not the entire json!
@@ -659,7 +650,9 @@ module Followup = struct
 
 
   (*===BETTER COMBINED FUNCTION VERSION=== 
-    So we can do 1 pass over bz2 file, build our fatset and collect adhoc retweets in same pass*)
+    So we can do 1 pass over bz2 file, build our fatset and collect adhoc retweets in same pass.
+    val getALLRetweets : line:string -> parse_result
+  *)
   let getALLRetweets ~line = 
     let j = try      
 	      (*print_string "===Parsing line: "; print_string line; print_newline ()*)
@@ -708,14 +701,17 @@ module Followup = struct
 	      let rtext = Yojson.Basic.Util.member "text" retweet_status in
 	      (RetweetParsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)))
 
-
+  (* val fillFatSet_And_AdhHocTweetSet :
+     adhocset:AdHocFatSet.t ->
+     fatset:Tweetset.t ->
+     compressedfile:string -> Tweetset.t * AdHocFatSet.t*)
   let fillFatSet_And_AdhHocTweetSet ~adhocset ~fatset ~compressedfile =
     let bz2inchan = openBZ2file ~file:compressedfile in
     let updateFatSet ~set:set ~tweet:tweet = 
       let toreplace = truncatedTweet ~tweet:tweet in 
-      if (Tweetset.mem toreplace set) then
-	let newset = Tweetset.remove toreplace set in
-	Tweetset.add tweet newset
+if (FatSet.mem toreplace set) then
+	let newset = FatSet.remove toreplace set in
+	FatSet.add tweet newset
       else (*Must not have been popular tweet/retweet, so ignore it*)
 	set in
     let rec consumeBuf ~adhocset ~fatset ~stringbuf ~startpos =
@@ -769,17 +765,127 @@ module Followup = struct
     in
     helper ~fatset:fatset ~adhocset:adhocset ~bz2inchan:bz2inchan ~chunksize:8388608 ~leftover:"";;
 
+  (*Invoke functions that parse the tweet -> retweet mapping file; finds
+    popular tweets; for each popular tweet retrieves from bz2 archive additional
+    datums such as text, userid, username; creates a new hashtable and 
+    ("fat")set with these additional datums for these popular tweets; also
+    identifies adhoc retweets from bz2 archive in same pass and makes a set of
+    these including full text, tweetid, userid, username, and RT@username & id.
+    val submain : unit -> unit * FatSet.t * AdHocFatSet.t
+  *)  
+  let submain () =
+    let infile = Sys.argv.(1) in   (* eg "a bz2 file"*) 
+    let outfile = Sys.argv.(2) in   (* eg "histogram.txt"*)
+    let triple = parseTable4PopularTweets ~file:infile in
+    let oldhtbl = GenericUtility.fst3 triple in
+    let thinset = GenericUtility.snd3 triple in
+    let freqmap = GenericUtility.thd3 triple in
+    let tuple = fillFatSet_And_AdhHocTweetSet ~adhocset:AdHocFatSet.empty ~fatset:FatSet.empty ~compressedfile:infile in
+    let fattweetset = GenericUtility.fst tuple in
+    let adhocset = GenericUtility.snd tuple in
+    let newHtbl = constructNewHtbl ~set:fattweetset ~oldHtbl:oldhtbl ~newHtbl:tweets_HASHtbl_NEW in
+    begin
+      GenericUtility.print2Afile_Int32Map ~amap:freqmap ~outfile:outfile;
+      print_string "===No. of Popular tweets & retweets found: ";
+      print_string (string_of_int (FatSet.cardinal fattweetset));
+      print_newline ();
+      print_string "===No. of AdHoc tweets (with only 1 RT@username) found: ";
+      print_string (string_of_int (AdHocFatSet.cardinal adhocset));
+      print_newline ();
+      (newHtbl, fattweetset, adhocset);
+    end;; 
+  
+
+
+  (*Given a fatset of popular known tweets and retweets, and a set of adhoc retweets, 
+    create a hashtable mapping any known tweet or retweet or any adhoc retweet,
+    to any adhoc retweet. Match up RT @ "username" and userID and check that
+    timestamps do not preclude a possible flow before adding such a mapping.
+    Later on eliminate mappings that fail some edit distance or greatest common
+    substring threshold. Also eyeball these mappings.
+    The complexity could be too large: should be A^2 + AB where A is # of elements
+    in the set of adhoc retweets and B is the # of elements in the set of known
+    tweets and retweets. Another way of considering the complexity is (XN)^2 where
+    X is some ration between 0 and 1 and N is the total number of elements in 
+    both sets (the adhoc and known tweet and retweet sets). The ratio X is unknown
+    because I don't know how many adhoc retweets exist, but it should be substantial
+    compared to the number of popular tweets and retweets.
+    This is better however than doing an all pairs edit distance metric which would
+    be N^2 over all tweets, ie, equivalent to this function with an impossible ratio
+    for X of 1, plus the added complexity of ever single edit distance computation. 
+    So in that sense actually this function has much lower complexity in the sense 
+    that we dispense with computation of any edit distance or common substring computation
+    alltogether, reserving that for later.
+    Note that elements in the set of adhoc retweets are not removed when added to
+    the mappings because none of the mappings are certain. Perhaps in future with a
+    good text metric we could reduce the set size as we add mappings, reducing complexity
+    and run time.
+    val constructCandidateFlows :
+    fatset:FatSet.t ->
+    adhocset:AdHocFatSet.t -> (FatSet.elt, FatSet.elt) Hashtbl.t
+  *)
+  let constructCandidateFlows ~fatset ~adhocset = 
+    let listA = FatSet.elements fatset in
+    let listB = AdHocFatSet.elements adhocset in
+    let candidates = Hashtbl.create(32768) in
+    let isCandidate ~tweetA ~tweetB =
+      (*Note that ALL tweets have a userid, and only adhoc retweets have non-zero 
+      adhocRTuserIDs*)
+      if tweetA.TweetRecord._userid_ == tweetB.TweetRecord._adhocRTuserID_ then
+	let timeA = TweetRecord.tm_fromString tweetA.TweetRecord._time_string_ in
+	let timeB = TweetRecord.tm_fromString tweetB.TweetRecord._time_string_ in
+	if GenericUtility.precedes timeA timeB then true else false 	
+      else false in
+    let rec checkall ~lista ~elem ~htbl = 
+      match lista with
+	h :: t -> 
+	  if isCandidate ~tweetA:h ~tweetB:elem then
+	    begin
+	      Hashtbl.add htbl h elem;
+	      checkall ~lista:t ~elem:elem ~htbl:htbl;
+	    end	      
+	  else
+	    checkall ~lista:t ~elem:elem ~htbl:htbl
+      | [] -> htbl in
+    (*Now perform comparisons against all other elements for every element in listB*)
+    let rec helper ~lista ~listb ~htbl = 
+      match listb with
+	h :: t -> let updatedHtbl = checkall ~lista:lista ~elem:h ~htbl:candidates in
+		  let updatedHtbl2 = checkall ~lista: listb ~elem:h ~htbl:updatedHtbl in
+		  helper ~lista:lista ~listb:t ~htbl:updatedHtbl2
+      | [] -> htbl in
+    helper ~lista:listA ~listb:listB ~htbl:candidates;;
+  
+  
+  (*Given an adhoc set of tweets, and a set of popular tweets and retweets, 
+    creates a new hashtable mapping potential flows from known popular tweets & 
+    retweets to adhoc retweets. Eyeball these and then work on a greatest common
+    substring or other text matching scheme to eliminate false positives.
+    val main : unit -> unit *)
+  let main () =
+    let triple = submain () in
+    let htbl = GenericUtility.fst3 triple in
+    let tweets = GenericUtility.snd3 triple in 
+    let adhocset = GenericUtility.thd3 triple in 
+    begin
+      print_string "===Submain () worked...attempting to find flows...";
+    end;;
+  
+  
+(*main ();*)
+  
+
 
 (*
-    Only if RT username matches that of a 
-    known user of a known tweet. Also note that it is easy to recover userids, not just names, 
-    from the dataset. Also note, we ignore adhor retweets that have multiple "RT"s and usernames. 
-    Also note that since an adhoc retweet might be a retweet of another, we're not going to find
-    all possible flows unless we explore all possible combinations...which we don't; we just
-    look for low-hanging fruit: tweets, retweets, and adhoc retweets of either.
-    Search for any known tweet in the set (using filter) whose userid matches 
-    the that of the username mentioned in the text. Check that timestamps do not preclude it from
-    being an adhoc retweet. Finally, add to a new htbl as a new mapping for later eyeballing. Eventually
-    we'll apply some greatest common substring or locality hash upon text
+  Note that it is easy to recover userids, not just names, from the dataset json, 
+  for adhoc retweets, specifically also for the RT @ username. We ignore adhoc 
+  retweets that have multiple "RT"s and usernames, of which some proportion exists.
+  Also note that since an adhoc retweet might be a retweet of another, we're not going to find
+  all possible flows unless we explore all possible combinations...which we don't; we just
+  look for low-hanging fruit: tweets, retweets, and adhoc retweets of either.
+  Search for any known tweet in the set (using filter) whose userid matches 
+  the that of the username mentioned in the text. Check that timestamps do not preclude it from
+  being an adhoc retweet. Finally, add to a new htbl as a new mapping for later eyeballing. Eventually
+  we'll apply some greatest common substring or locality hash upon text
 *)
 end

@@ -13,6 +13,7 @@ module TweetRecord : sig
   val print_FatTweetRecord : outchan:'a -> trec:t -> unit
   val printHTable : hashtbl:(t, t) Hashtbl.t -> outfile:string -> unit
   val tm_fromString : string -> Unix.tm
+  val emptyTrec : unit -> t
 end = struct
   type t = { _id_ : int; 
 	     _userid_: int ; 
@@ -145,6 +146,14 @@ end = struct
       tm_mday = day; tm_mon = month; tm_year = (year-1900); tm_wday = 0; 
       tm_yday = 0; tm_isdst = false};;
 
+  let emptyTrec () = { _id_ =0 ; 
+	     _userid_= 0 ; 
+	     _username_ = "" ; 
+	     _time_string_ =  ""; 
+	     _text_ = "";
+	     _adhocRTuserID_ = 0 ;
+	     _adhocRTusername_ = "" }
+
 end
 
 
@@ -152,7 +161,9 @@ end
   live as well--and then fill in tweet text, user ids and names, etc, and try to find flows via adhoc retweets 
   by examining the entire dataset again; this cannot be done for text b/c memory pressure even for a relatively
   "small" data set is enormous even with more fine grained memory management. *)
-module Followup = struct
+module Followup : sig 
+  val main : unit -> unit (*The only exposed function*)
+end  = struct
   let popular_enough = 51;;
   (*Set of old tweets, lacking text, etc*)
   module Tweetset = Set.Make(TweetRecord);;
@@ -459,8 +470,14 @@ module Followup = struct
 	let tuple = getRetweetsExtraInfo ~line:toconsume in
 	match tuple with 
 	  (RetweetParsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)) -> 
-	    let sourcetweet = createTrecord ~id:rid ~time:rtime ~userid:ruserid ~username:rusername ~text:rtext ?adhocuserid:None ?adhocusername:None in
-	    let retweet = createTrecord ~id:id ~time:time ~userid:userid ~username:username ~text:text ?adhocuserid:None ?adhocusername:None in
+	    let sourcetweet = 
+	      createTrecord 
+		~id:rid ~time:rtime ~userid:ruserid ~username:rusername 
+		~text:rtext ?adhocuserid:None ?adhocusername:None in
+	    let retweet = 
+	      createTrecord 
+		~id:id ~time:time ~userid:userid ~username:username 
+		~text:text ?adhocuserid:None ?adhocusername:None in
 	    let updatedSet = updateSet ~set:set ~tweet:sourcetweet in
 	    let updatedSet2 = updateSet ~set:updatedSet ~tweet:retweet in
 	    consumeBuf ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~set:updatedSet2;
@@ -533,7 +550,7 @@ module Followup = struct
     let regexp_retweet = Str.regexp "retweeted_status" in
     try Str.search_forward regexp_retweet line 0 with Not_found -> -1;;
   
-  (*this function likely has a better more direct alternative
+  (*This function likely has a better more direct alternative
     val getUID_fromAdhocRT_mention :
     tweetjson:Yojson.Basic.json -> Yojson.Basic.json * Yojson.Basic.json
   *)
@@ -556,7 +573,8 @@ module Followup = struct
     let userid_adhoc = (*Yojson.Basic.Util.to_int*) (snd useridjson) in
     (*also get the RT @ username *)
     let username_adhoc = (*Yojson.Basic.Util.to_int*) (snd (List.nth unwrapped4 0)) in
-    (userid_adhoc, username_adhoc);;
+    (if userid_adhoc == `Null || username_adhoc == `Null then print_string "===Error starts here===" else ();
+    (userid_adhoc, username_adhoc));;
 
 
   (*Do another pass over a compressed bz2 tweets file; gather all those tweets that are adhoc
@@ -564,7 +582,6 @@ module Followup = struct
     tweets or retweets or still other adhoc retweets.
     val parse4AdHocRetweets :
     file:string -> adhocset:AdHocFatSet.t -> chunksize:int -> AdHocFatSet.t
-*)
   let parse4AdHocRetweets ~file ~adhocset ~chunksize =
     let bz2inchan = openBZ2file ~file:file in
     (*Invokes regexp upon contents of text field only within json, not the entire json!
@@ -597,7 +614,8 @@ module Followup = struct
 	let userj = Yojson.Basic.Util.member "user" j in 
 	let userid = Yojson.Basic.Util.member "id" userj in 
 	let username = Yojson.Basic.Util.member "screen_name" userj in
-	(AdHocRetweetParsed (id, time, userid, username, text, uid_after_rt_at, uname_after_rt_at)) in
+	(AdHocRetweetParsed (id, time, userid, username, text, uid_after_rt_at, uname_after_rt_at)) 
+      | _ , _ -> NoParse in
     (*the heart of this function: given a tweet, if it is an adhoc RT with only one "RT @ username"
       within the text, add to set for later analysis.*)
     let rec consumeBuf ~stringbuf ~startpos ~adhocset =
@@ -640,7 +658,7 @@ module Followup = struct
 	end
     in
     helper ~set:adhocset ~bz2inchan:bz2inchan ~chunksize:chunksize ~leftover:"";;
-
+  *)
 
   (*===BETTER COMBINED FUNCTION VERSION=== 
     So we can do 1 pass over bz2 file, build our fatset and collect adhoc retweets in same pass.
@@ -657,8 +675,16 @@ module Followup = struct
       with _ -> ((*print_string "===Failed to Parse B=== "; print_newline ();*) `Null)
     in
     match retweet_status with
-      `Null ->  (let text = Yojson.Basic.Util.member "text" j in 
-		 let textstring = Yojson.Basic.Util.to_string text in
+      `Null ->  (let text = 
+		   try 
+		     Yojson.Basic.Util.member "text" j 
+		   with _ -> (print_string "Error line 678"; print_newline (); `Null) in 
+		 let textstring = 
+		   try (*a json line of this form is randomly crashing me here: { "limit": { "track": 27189957 } }*)
+		     Yojson.Basic.Util.to_string text 
+		   with _ -> (print_string "Error line 679"; print_string "the json: "; 
+			      print_string (Yojson.Basic.pretty_to_string j); 
+			      print_newline (); " ") in
 		 (*Other possible regexp:  (RT.?\u[a-z0-9]*.?@) or better  (RT[^@]{0,5}@)  but {} not recognized by Str
 		   or "RT[^@]@" also works*)
 		 let regexp_retweet = Str.regexp "\\(\\(RT[^@]@\\)\\|\\(RT[^@][^@]@\\)\\)" in
@@ -670,17 +696,20 @@ module Followup = struct
 		 |  pos1, pos2 when pos1 != -1 && pos2 != -1 -> NoParse (*too many RT @ usernames*)
 		 |  pos1, -1 when pos1 != -1 -> (*possible adhoc retweet we're looking for*)
 		   (*make a record out it; store it; later we'll try to find where it might fit*)
-		   let after_rt_at_tuple = getUID_fromAdhocRT_mention ~tweetjson:j in
-		   let uid_after_rt_at = GenericUtility.fst after_rt_at_tuple in
-		   let uname_after_rt_at = GenericUtility.snd after_rt_at_tuple in
-		   let id = Yojson.Basic.Util.member "id" j in
-		   let time = Yojson.Basic.Util.member "created_at" j in
-		   let userj = Yojson.Basic.Util.member "user" j in 
-		   let userid = Yojson.Basic.Util.member "id" userj in 
-		   let username = Yojson.Basic.Util.member "screen_name" userj in
-		   let text = Yojson.Basic.Util.member "text" j in 
-		   (AdHocRetweetParsed (id, time, userid, username, text, uid_after_rt_at, uname_after_rt_at)))
-      | _ -> (let id = Yojson.Basic.Util.member "id" j in
+		   (try
+		     let after_rt_at_tuple = getUID_fromAdhocRT_mention ~tweetjson:j in
+		     let uid_after_rt_at = GenericUtility.fst after_rt_at_tuple in
+		     let uname_after_rt_at = GenericUtility.snd after_rt_at_tuple in
+		     let id = Yojson.Basic.Util.member "id" j in
+		     let time = Yojson.Basic.Util.member "created_at" j in
+		     let userj = Yojson.Basic.Util.member "user" j in 
+		     let userid = Yojson.Basic.Util.member "id" userj in 
+		     let username = Yojson.Basic.Util.member "screen_name" userj in
+		     let text = Yojson.Basic.Util.member "text" j in
+		     AdHocRetweetParsed (id, time, userid, username, text, uid_after_rt_at, uname_after_rt_at)
+		   with _ -> (print_string "Error line 710"; print_string (Yojson.Basic.pretty_to_string j); print_newline (); NoParse))
+		 | _, _ -> NoParse)
+      | _ -> (try let id = Yojson.Basic.Util.member "id" j in
 	      let rid = Yojson.Basic.Util.member "id" retweet_status in
 	      let time = Yojson.Basic.Util.member "created_at" j in
 	      let rtime = Yojson.Basic.Util.member "created_at" retweet_status in
@@ -692,7 +721,8 @@ module Followup = struct
 	      let ruserid = Yojson.Basic.Util.member "id" ruserj in
 	      let rusername = Yojson.Basic.Util.member "screen_name" ruserj in
 	      let rtext = Yojson.Basic.Util.member "text" retweet_status in
-	      (RetweetParsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)))
+	      RetweetParsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)
+	with _ -> (print_string "Error line 725"; print_newline (); NoParse));;
 
   (* val fillFatSet_And_AdhHocTweetSet :
      adhocset:AdHocFatSet.t ->
@@ -702,7 +732,7 @@ module Followup = struct
     let bz2inchan = openBZ2file ~file:compressedfile in
     let updateFatSet ~set:set ~tweet:tweet = 
       let toreplace = truncatedTweet ~tweet:tweet in 
-if (FatSet.mem toreplace set) then
+      if (FatSet.mem toreplace set) then
 	let newset = FatSet.remove toreplace set in
 	FatSet.add tweet newset
       else (*Must not have been popular tweet/retweet, so ignore it*)
@@ -718,22 +748,36 @@ if (FatSet.mem toreplace set) then
 	(fatset, startpos, adhocset)
       else
 	let toconsume = String.sub stringbuf startpos (nextbreak - startpos) in
-	let tuple = getALLRetweets ~line:toconsume in
+	let tuple = try getALLRetweets ~line:toconsume with _ -> (print_string "Error line 751"; print_newline (); exit 2) in
 	match tuple with 
 	  (RetweetParsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)) -> 
-	    let sourcetweet = createTrecord ~id:rid ~time:rtime ~userid:ruserid ~username:rusername ~text:rtext ?adhocuserid:None ?adhocusername:None in
-	    let retweet = createTrecord ~id:id ~time:time ~userid:userid ~username:username ~text:text ?adhocuserid:None ?adhocusername:None in
-	    let updatedSet = updateFatSet ~set:fatset ~tweet:sourcetweet in
-	    let updatedSet2 = updateFatSet ~set:updatedSet ~tweet:retweet in
-	    consumeBuf ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~fatset:updatedSet2 ~adhocset:adhocset
+	    let sourcetweet = try
+	       createTrecord ~id:rid ~time:rtime ~userid:ruserid 
+	      ~username:rusername ~text:rtext ?adhocuserid:None ?adhocusername:None 
+	      with _ -> (print_string "Error line 757"; print_newline (); exit 2)
+	    in
+	    let retweet = 
+	      try createTrecord ~id:id ~time:time ~userid:userid 
+		~username:username ~text:text ?adhocuserid:None ?adhocusername:None with _ ->  (print_string  "Error line 761"; print_newline (); exit 2) in
+	    let updatedSet = try updateFatSet ~set:fatset ~tweet:sourcetweet with _ -> (print_string "Error line 762"; print_newline (); exit 2) in
+	    let updatedSet2 = try updateFatSet ~set:updatedSet ~tweet:retweet  with _ -> (print_string "Error line 763"; print_newline (); exit 2) in
+	    consumeBuf 
+	      ~stringbuf:stringbuf ~startpos:(nextbreak+1) 
+	      ~fatset:updatedSet2 ~adhocset:adhocset
 	| (AdHocRetweetParsed (id, time, userid, username, text, uid_after_rt_at, uname_after_rt_at)) -> 
-	    let adhocrt = createTrecord ~id:id ~time:time ~userid:userid 
+	    let adhocrt = try createTrecord ~id:id ~time:time ~userid:userid 
 	      ~username:username ~adhocuserid:uid_after_rt_at 
-	      ~adhocusername:uname_after_rt_at ~text:text in
-	    let updatedAdHocSet = AdHocFatSet.add adhocrt adhocset in
-	    consumeBuf ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~fatset:fatset ~adhocset:updatedAdHocSet
+	      ~adhocusername:uname_after_rt_at ~text:text 
+	      with _ -> (print_string "Error line 771"; print_newline (); exit 2)
+	    in
+	    let updatedAdHocSet = try AdHocFatSet.add adhocrt adhocset with _ -> (print_string "Error line 773"; print_newline (); exit 2) in
+	    consumeBuf 
+	      ~stringbuf:stringbuf ~startpos:(nextbreak+1) 
+	      ~fatset:fatset ~adhocset:updatedAdHocSet
 	| NoParse -> 
-	  consumeBuf ~fatset:fatset ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~adhocset:adhocset
+	  consumeBuf 
+	    ~fatset:fatset ~stringbuf:stringbuf 
+	    ~startpos:(nextbreak+1) ~adhocset:adhocset
     in
     let rec helper ~fatset ~adhocset ~bz2inchan ~chunksize ~leftover = 
       let nextchunk = input_next_x_chars_improved ~bzinchan:bz2inchan ~howmanymore:chunksize in
@@ -771,18 +815,23 @@ if (FatSet.mem toreplace set) then
     let oldhtbl = GenericUtility.fst3 triple in
     (*let thinset = GenericUtility.snd3 triple in*)
     let freqmap = GenericUtility.thd3 triple in
-    let tuple = fillFatSet_And_AdhHocTweetSet ~adhocset:AdHocFatSet.empty ~fatset:FatSet.empty ~compressedfile:infile in
+    let tuple = 
+      fillFatSet_And_AdhHocTweetSet 
+	~adhocset:AdHocFatSet.empty 
+	~fatset:FatSet.empty 
+	~compressedfile:infile in
     let fattweetset = GenericUtility.fst tuple in
     let adhocset = GenericUtility.snd tuple in
-    let newHtbl = constructNewHtbl ~set:fattweetset ~oldHtbl:oldhtbl ~newHtbl:tweets_HASHtbl_NEW in
+    let newHtbl = constructNewHtbl ~set:fattweetset ~oldHtbl:oldhtbl 
+      ~newHtbl:tweets_HASHtbl_NEW in
     begin
-      GenericUtility.print2Afile_Int32Map ~amap:freqmap ~outfile:outfile;
       print_string "===No. of Popular tweets & retweets found: ";
       print_string (string_of_int (FatSet.cardinal fattweetset));
       print_newline ();
       print_string "===No. of AdHoc tweets (with only 1 RT@username) found: ";
       print_string (string_of_int (AdHocFatSet.cardinal adhocset));
       print_newline ();
+      GenericUtility.print2Afile_Int32Map ~amap:freqmap ~outfile:outfile;
       (newHtbl, fattweetset, adhocset);
     end;; 
   
@@ -803,7 +852,7 @@ if (FatSet.mem toreplace set) then
     compared to the number of popular tweets and retweets.
     This is better however than doing an all pairs edit distance metric which would
     be N^2 over all tweets, ie, equivalent to this function with an impossible ratio
-    for X of 1, plus the added complexity of ever single edit distance computation. 
+    for X of 1, plus the added complexity of every single edit distance computation. 
     So in that sense actually this function has much lower complexity in the sense 
     that we dispense with computation of any edit distance or common substring computation
     alltogether, reserving that for later.
@@ -876,12 +925,14 @@ if (FatSet.mem toreplace set) then
   Note that it is easy to recover userids, not just names, from the dataset json, 
   for adhoc retweets, specifically also for the RT @ username. We ignore adhoc 
   retweets that have multiple "RT"s and usernames, of which some proportion exists.
-  Also note that since an adhoc retweet might be a retweet of another, we're not going to find
-  all possible flows unless we explore all possible combinations...which we don't; we just
-  look for low-hanging fruit: tweets, retweets, and adhoc retweets of either.
-  Search for any known tweet in the set (using filter) whose userid matches 
-  the that of the username mentioned in the text. Check that timestamps do not preclude it from
-  being an adhoc retweet. Finally, add to a new htbl as a new mapping for later eyeballing. Eventually
-  we'll apply some greatest common substring or locality hash upon text
+  Also note that since an adhoc retweet might be a retweet of another, we're not
+  going to find all possible flows unless we explore all possible combinations...
+  which we don't.
+  We just look for adhoc retweets of known tweets & retweets & adhoc retweets.
+  Search for any known tweet in the set whose userid matches the that of the 
+  username mentioned in the text. Check that timestamps do not preclude it from
+  being an adhoc retweet. Finally, add to a new htbl as a new mapping for later 
+  eyeballing. Eventually we'll apply some greatest common substring or locality 
+  hash upon text
 *)
 end

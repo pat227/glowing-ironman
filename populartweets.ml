@@ -3,17 +3,18 @@
 open GenericUtility;;
 module TweetRecord : sig 
   type t = { _id_ : int;            (*unique tweet id as before*) 
-	     _userid_: int ;        (*user id of the tweeter*)
-	     _username_: string ;   (*username of the tweeter*)
-	     _time_string_: string; (*ripped from twitter json*)
-	     _text_: string;        (*tweet text in full*)
-	     _adhocRTuserID_ : int; (*unique userID of username within text following "RT @", if present, else zero*)
-	     _adhocRTusername_ : string };; (*String username more easily recognizable*)
+	     _userid_: int ;        (*New datum: user id of the tweeter*)
+	     _username_: string ;   (*New datum: username of the tweeter*)
+	     _time_string_: string; (*ripped from twitter json, just as before*)
+	     _text_: string;        (*New datum: tweet text in full*)
+	     _adhocRTuserID_ : int; (*New datum: unique userID of "RT @ username", if present, else zero*)
+	     _adhocRTusername_ : string };; (*String form RT @ username - more easily recognizable*)
   val compare: t -> t -> int
-  val print_FatTweetRecord : outchan:'a -> trec:t -> unit
+  val print_FatTweetRecord : trec:t -> unit
   val printHTable : hashtbl:(t, t) Hashtbl.t -> outfile:string -> unit
   val tm_fromString : string -> Unix.tm
   val emptyTrec : unit -> t
+  val printlist : t list -> unit
 end = struct
   type t = { _id_ : int; 
 	     _userid_: int ; 
@@ -23,9 +24,11 @@ end = struct
 	     _adhocRTuserID_ : int;
 	     _adhocRTusername_ : string };;
 
+  (*val compare: t -> t -> int *)
   let compare t1 t2 = Int64.compare (Int64.of_int t1._id_) (Int64.of_int t2._id_);;
 
-  (*Print to screen -- had an unused named argument, and compiler didn't complain!? *)
+  (*Print to screen -- had an unused named argument, and compiler didn't complain!?
+  val print_FatTweetRecord : trec:t -> unit*)
   let print_FatTweetRecord ~trec = 
     begin
       print_string " tweetid: ";
@@ -52,7 +55,8 @@ end = struct
       else print_newline ();
     end;;
 
-  (*Print to file a hashtable of [new fat] tweetrecords*)
+  (*Print to file a hashtable of [new fat] tweetrecords
+    val printHTable : hashtbl:(t, t) Hashtbl.t -> outfile:string -> unit*)
   let printHTable ~hashtbl ~outfile = 
     let outchan = open_out outfile in 
     (*Makes note of id serving as key, and doesn't print except once while 
@@ -74,6 +78,7 @@ end = struct
 	  output_string outchan treckey._time_string_;
 	  if treckey._adhocRTuserID_ > 0 then
 	    begin
+	      output_string outchan " ";
 	      output_string outchan (string_of_int treckey._adhocRTuserID_);
 	      output_string outchan " ";
 	      output_string outchan treckey._adhocRTusername_;
@@ -91,6 +96,7 @@ end = struct
 	  output_string outchan trecord._time_string_;
 	  if trecord._adhocRTuserID_ > 0 then
 	    begin
+	      output_string outchan " ";
 	      output_string outchan (string_of_int trecord._adhocRTuserID_);
 	      output_string outchan " ";
 	      output_string outchan trecord._adhocRTusername_;
@@ -126,6 +132,8 @@ end = struct
     end;;
 
   (*Convert the heretofore string ripped from the json into a unix tm struct.
+    Could be made more robust although the json data as input seems to be very
+    uniform at hasn't yet caused any errors in here.
     val tm_ofTweet : string -> Unix.tm *)
   let tm_fromString timestring = 
     (*of the form: "Mar 11 12:39:05 2013"*)
@@ -152,7 +160,16 @@ end = struct
 	     _time_string_ =  ""; 
 	     _text_ = "";
 	     _adhocRTuserID_ = 0 ;
-	     _adhocRTusername_ = "" }
+	     _adhocRTusername_ = "" };;
+
+  (* Print elements of a list of tweetrecords.
+     t list -> unit
+  *)
+  let rec printlist elems = 
+    match elems with 
+      h :: t -> (print_FatTweetRecord ~trec:h;
+		 printlist t;)
+    | [] -> ();;
 
 end
 
@@ -175,6 +192,19 @@ end  = struct
     a common dependency to avoid duplication, bloat, etc.*)
 
   let tweets_HASHtbl_OLD : (TweetRecord.t, TweetRecord.t) Hashtbl.t = Hashtbl.create(8192);;
+  (*Took a short while to get the next line exactly correct*)
+  let tweets_HASHtbl_NEW : (TweetRecord.t, TweetRecord.t) Hashtbl.t = Hashtbl.create(8192);;
+
+  (*Simple function to get around isomorphic type constraints that in our case hinders work. 
+    val convert : t1:Tweetset.elt -> TweetRecord.t = <fun>*)
+  let convertTSelementt2TR ~(t1:Tweetset.elt) : TweetRecord.t = 
+    { TweetRecord._id_ = t1.TweetRecord._id_;
+      TweetRecord._time_string_ = t1.TweetRecord._time_string_ ;
+      TweetRecord._userid_ = t1.TweetRecord._userid_ ;
+      TweetRecord._username_ = t1.TweetRecord._username_ ;
+      TweetRecord._text_ = t1.TweetRecord._text_ ;
+      TweetRecord._adhocRTuserID_ = t1.TweetRecord._adhocRTuserID_;
+      TweetRecord._adhocRTusername_ = t1.TweetRecord._adhocRTusername_ };;
 
   (*Clearer intention that just hinging on true/false or other values*)
   type inputstate = 
@@ -505,9 +535,6 @@ end  = struct
     in
     helper ~set:set ~bz2inchan:bz2inchan ~chunksize:8388608 ~leftover:"";;
   
-  (*Took a short while to get the next line exactly correct*)
-  let tweets_HASHtbl_NEW : (Tweetset.t, Tweetset.elt) Hashtbl.t = Hashtbl.create(8192);;
-
   (*Using the Set of tweet & retweet (not ad hoc) records that contain text, 
     time, username, userid and the old hashtable of mappings, construct a new
     hashtable of mappings.
@@ -517,8 +544,7 @@ end  = struct
   let constructNewHtbl ~set ~oldHtbl ~newHtbl = 
     let setref = ref set in 
     let semiequal tweetA tweetB = 
-      if tweetA.TweetRecord._id_ == tweetB.TweetRecord._id_ && 
-	tweetA.TweetRecord._time_string_ == tweetB.TweetRecord._time_string_ 
+      if tweetA.TweetRecord._id_ == tweetB.TweetRecord._id_
       then true else false in
     let toiter ~newHtbl ~set key binding =
       let sets = Tweetset.partition (semiequal binding) !set in
@@ -526,23 +552,132 @@ end  = struct
       let sets2 = Tweetset.partition (semiequal key) !set in
       let key2use = GenericUtility.fst sets2 in
       begin
-	if Tweetset.cardinal toInsert == 1 then 
-	  (Hashtbl.add newHtbl key2use (Tweetset.choose toInsert);
+	if Tweetset.cardinal toInsert == 1 && Tweetset.cardinal key2use == 1 then 
+	  (Hashtbl.add newHtbl 
+	     (convertTSelementt2TR (Tweetset.choose key2use)) 
+	     (convertTSelementt2TR (Tweetset.choose toInsert));
 	   (*update the ref in next line; do not use sets2, we need the set to 
 	     always hold the key since we're dealing with multiple bindings; 
 	     otherwise we'd get back an empty set upon next iter and partition 
 	     and have no key to use at all in above line.*)
            set := GenericUtility.snd sets)
 	else
-	  (print_string "===This should never happen, tweetIDs are supposed to be unique!===";
-	   exit 2;)
+	  (print_string "===This should never happen, line 566; expect exactly 1 key value pair===";
+	   print_newline ();
+	   print_string "toInsert elems: ";
+	   let elems = Tweetset.elements toInsert in
+	   TweetRecord.printlist elems;
+	   print_string "key2use elems: ";
+	   let elems = Tweetset.elements key2use in
+	   TweetRecord.printlist elems;)
       end
     in
     let rec helper ~set ~oldHtbl ~newHtbl = 
-      let williter = toiter ~newHtbl:newHtbl ~set:set in
-      Hashtbl.iter williter oldHtbl
+      begin
+	let williter = toiter ~newHtbl:newHtbl ~set:set in
+	Hashtbl.iter williter oldHtbl;
+	print_string "===Finished creating fat htbl===";
+	print_newline ();
+	newHtbl;
+      end
     in
     helper ~set:setref ~oldHtbl:oldHtbl ~newHtbl:newHtbl;;
+
+  (*Better idea: using old thinset Htbl and new fatset, print the old thinset augmented by the datums
+    in the fatset rather than trying to reconstruct a fat version of the htbl; and write to disk as file. 
+    Later on we could use the output file as input to create a clean copy of the fat htbl. Also we'll 
+    benefit from the decreasing size of the set as we pull elements out to print them.
+    val constructNewHtblOnDisk : set:Tweetset.t -> 
+    oldHtbl:(TweetRecord.t, TweetRecord.t) Hashtbl.t -> 
+    outfile:string -> unit
+  *)
+  let constructNewHtblOnDisk ~outfile ~fatset ~thinhtbl =
+    let outchan = open_out outfile in
+    let priorid = ref 0 in
+    let semiequal tweetA tweetB = 
+      if tweetA.TweetRecord._id_ == tweetB.TweetRecord._id_
+      then true else false in
+    let getFromFatSet ~id ~fatset = 
+      let sets = Tweetset.partition (semiequal id) fatset in
+      let smallerset = GenericUtility.fst sets in
+      let one_element = GenericUtility.snd sets in
+      (smallerset , one_element) in
+    let writeFold outchan fatset treckey trecord = 
+      let id = treckey._id_ in
+      let otherid = trecord._id_ in
+      let fattuple = getFromFatSet ~id:id ~fatset:fatset in
+      let reducedSet = GenericUtility.fst fattuple in
+      let fatkey = GenericUtility.snd fattuple in
+      let fattuple2 = getFromFatSet ~id:otherid ~fatset:reducedSet in
+      let reducedSet2 = GenericUtility.fst fattuple2 in
+      let fatrecord = GenericUtility.snd fattuple2 in
+      if id != !priorid then
+	begin 
+	  priorid := id;
+	  output_string outchan (string_of_int id);
+	  output_string outchan ", ";
+	  output_string outchan (string_of_int fatkey._userid_);
+	  output_string outchan ", ";
+	  output_string outchan fatkey._username_;
+	  output_string outchan ", ";
+	  output_string outchan fatkey._text_;
+	  output_string outchan ", ";
+	  output_string outchan fatkey._time_string_;
+	  if fatkey._adhocRTuserID_ > 0 then
+	    begin
+	      output_string outchan " ";
+	      output_string outchan (string_of_int fatkey._adhocRTuserID_);
+	      output_string outchan " ";
+	      output_string outchan fatkey._adhocRTusername_;
+	    end
+	  else ();
+	  output_string outchan " -> ";
+	  output_string outchan (string_of_int fatrecord._id_);
+	  output_string outchan ", ";
+	  output_string outchan (string_of_int fatrecord._userid_);
+	  output_string outchan ", ";
+	  output_string outchan fattrecord._username_;
+	  output_string outchan ", ";
+	  output_string outchan fattrecord._text_;
+	  output_string outchan ", ";
+	  output_string outchan fattrecord._time_string_;
+	  if fattrecord._adhocRTuserID_ > 0 then
+	    begin
+	      output_string outchan " ";
+	      output_string outchan (string_of_int fatrecord._adhocRTuserID_);
+	      output_string outchan " ";
+	      output_string outchan fatrecord._adhocRTusername_;
+	    end
+	  else ();
+	  output_string outchan "\n";
+	end
+      else
+	begin (*42 spaces @ present to accomodate source-tweet id, date*)
+	  output_string outchan "                                          | ";
+	  output_string outchan (string_of_int fatrecord._id_);
+	  output_string outchan ", ";
+	  output_string outchan (string_of_int fatrecord._userid_);
+	  output_string outchan ", ";
+	  output_string outchan fatrecord._username_;
+	  output_string outchan ", ";
+	  output_string outchan fatrecord._text_;
+	  output_string outchan ", ";
+	  output_string outchan fatrecord._time_string_;
+	  if trecord._adhocRTuserID_ > 0 then
+	    begin
+	      output_string outchan (string_of_int fatrecord._adhocRTuserID_);
+	      output_string outchan " ";
+	      output_string outchan fatrecord._adhocRTusername_;
+	    end
+	  else ();
+	  output_string outchan "\n";
+	end
+    in
+    begin
+      Hashtbl.iter (writeFold outchan) hashtbl;
+      close_out outchan;
+    end;;
+      
 
   (*Determine more quickly if a line of text has a nested element indicative of being a non-adhoc retweet
     val isRT : line:string -> int*)
@@ -755,7 +890,7 @@ end  = struct
   *)  
   let submain ~infile ~outfile ~oldhtblfile =
     let triple = parseTable4PopularTweets ~file:oldhtblfile in
-    (*let oldhtbl = GenericUtility.fst3 triple in*)
+    let oldhtbl = GenericUtility.fst3 triple in
     let thinset = GenericUtility.snd3 triple in
     let freqmap = GenericUtility.thd3 triple in
     let tuple = 
@@ -766,8 +901,8 @@ end  = struct
     let fattweetset = GenericUtility.fst tuple in
     let adhocset = GenericUtility.snd tuple in
     (*Bug in constructNewHtbl and we don't really need it*)
-    (*let newHtbl = constructNewHtbl ~set:fattweetset ~oldHtbl:oldhtbl 
-      ~newHtbl:tweets_HASHtbl_NEW in*)
+    let newHtbl = constructNewHtbl ~set:fattweetset ~oldHtbl:oldhtbl 
+      ~newHtbl:tweets_HASHtbl_NEW in
     begin
       print_string "===No. of Popular tweets & retweets found: ";
       print_string (string_of_int (FatSet.cardinal fattweetset));
@@ -776,6 +911,7 @@ end  = struct
       print_string (string_of_int (AdHocFatSet.cardinal adhocset));
       print_newline ();
       GenericUtility.print2Afile_Int32Map ~amap:freqmap ~outfile:outfile;
+      TweetRecord.printHTable ~hashtbl:newHtbl ~outfile:"fathtbl.txt";
       (fattweetset, adhocset);
     end;; 
   
@@ -814,29 +950,33 @@ end  = struct
     let candidates = Hashtbl.create(32768) in
     let isCandidate ~tweetA ~tweetB =
       (*Note that ALL tweets have a userid, and only adhoc retweets have non-zero 
-      adhocRTuserIDs--except when for some reason the twitter data lacks the user ID
-      and username of an RT @ username despite the fact that it should.*)
+      adhocRTuserIDs*)
       if (tweetA.TweetRecord._userid_ == tweetB.TweetRecord._adhocRTuserID_) 
 	|| (tweetA.TweetRecord._username_ == tweetB.TweetRecord._adhocRTusername_) then
-	let timeA = TweetRecord.tm_fromString tweetA.TweetRecord._time_string_ in
-	let timeB = TweetRecord.tm_fromString tweetB.TweetRecord._time_string_ in
-	if GenericUtility.precedes timeA timeB then true else false
+	(let timeA = TweetRecord.tm_fromString tweetA.TweetRecord._time_string_ in
+	 let timeB = TweetRecord.tm_fromString tweetB.TweetRecord._time_string_ in
+	 GenericUtility.precedes timeA timeB)
       else false in
     let rec checkall ~lista ~elem ~htbl = 
       match lista with
 	h :: t -> 
-	  if isCandidate ~tweetA:h ~tweetB:elem then
-	    begin
-	      Hashtbl.add htbl h elem;
-	      checkall ~lista:t ~elem:elem ~htbl:htbl;
-	    end	      
-	  else
-	    checkall ~lista:t ~elem:elem ~htbl:htbl
+	  begin
+	    if isCandidate ~tweetA:h ~tweetB:elem then
+	      begin
+		Hashtbl.add htbl h elem;
+	      end
+	    else if isCandidate ~tweetA:elem ~tweetB:h then
+	      begin
+		Hashtbl.add htbl elem h;
+	      end
+	    else ();
+	    checkall ~lista:t ~elem:elem ~htbl:htbl;
+	  end
       | [] -> htbl in
     (*Now perform comparisons against all other elements for every element in listB*)
     let rec helper ~lista ~listb ~htbl = 
       match listb with
-	h :: t -> let updatedHtbl = checkall ~lista:lista ~elem:h ~htbl:candidates in
+	h :: t -> let updatedHtbl = checkall ~lista:lista ~elem:h ~htbl:htbl in
 		  let updatedHtbl2 = checkall ~lista: listb ~elem:h ~htbl:updatedHtbl in
 		  helper ~lista:lista ~listb:t ~htbl:updatedHtbl2
       | [] -> htbl in
@@ -852,6 +992,7 @@ end  = struct
     let archive = Sys.argv.(1) in   (* eg "a bz2 file"*)
     let oldhtbl = Sys.argv.(2) in   (* eg "output.txt" from older module run*) 
     let outfile = Sys.argv.(3) in   (* eg "histogram.txt"*)
+    let outfile2 = Sys.argv.(4) in  (* eg "firstrun.txt", place to write possible retweet flows*)
     let tuple = submain ~infile:archive ~oldhtblfile:oldhtbl ~outfile:outfile in
     (*let htbl = GenericUtility.fst3 triple in*)
     let tweets = GenericUtility.fst tuple in 
@@ -859,7 +1000,7 @@ end  = struct
     begin
       print_string "===Submain () worked...attempting to find flows...";
       let candidatemappings = constructCandidateFlows ~fatset:tweets ~adhocset:adhocset in
-      TweetRecord.printHTable ~hashtbl:candidatemappings ~outfile:"firstrun.txt";
+      TweetRecord.printHTable ~hashtbl:candidatemappings ~outfile:outfile2;
     end;;
   
   

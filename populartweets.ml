@@ -594,23 +594,28 @@ end  = struct
   let constructNewHtblOnDisk ~outfile ~fatset ~thinhtbl =
     let outchan = open_out outfile in
     let priorid = ref 0 in
+    let setref = ref fatset in
     let semiequal tweetA tweetB = 
       if tweetA.TweetRecord._id_ == tweetB.TweetRecord._id_
       then true else false in
-    let getFromFatSet ~id ~fatset = 
-      let sets = Tweetset.partition (semiequal id) fatset in
-      let smallerset = GenericUtility.fst sets in
+    let getFromFatSet ~id ~fatsetref = 
+      let sets = Tweetset.partition (semiequal id) !fatset in
       let one_element = GenericUtility.snd sets in
-      (smallerset , one_element) in
+      let smallerset = Tweetset.remove one_element !fatset in
+      begin
+	!fatset = smallerset;
+	(one_element, fatset);
+      end 
+    in
     let writeFold outchan fatset treckey trecord = 
       let id = treckey._id_ in
       let otherid = trecord._id_ in
       let fattuple = getFromFatSet ~id:id ~fatset:fatset in
-      let reducedSet = GenericUtility.fst fattuple in
-      let fatkey = GenericUtility.snd fattuple in
+      let reducedSet = GenericUtility.snd fattuple in
+      let fatkey = GenericUtility.fst fattuple in
       let fattuple2 = getFromFatSet ~id:otherid ~fatset:reducedSet in
-      let reducedSet2 = GenericUtility.fst fattuple2 in
-      let fatrecord = GenericUtility.snd fattuple2 in
+      let reducedSet2 = GenericUtility.snd fattuple2 in
+      let fatrecord = GenericUtility.fst fattuple2 in
       if id != !priorid then
 	begin 
 	  priorid := id;

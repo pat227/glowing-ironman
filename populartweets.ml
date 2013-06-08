@@ -43,10 +43,12 @@ end = struct
       print_string " text: ";
       print_string trec._text_;
       print_string " ";
+      print_string " time: ";
       print_string trec._time_string_;
       print_string " ";
       if trec._adhocRTuserID_ > 0 then
 	begin
+	  print_string " ";
 	  print_string (string_of_int trec._adhocRTuserID_);
 	  print_string " ";
 	  print_string trec._adhocRTusername_;
@@ -118,6 +120,7 @@ end = struct
 	  output_string outchan trecord._time_string_;
 	  if trecord._adhocRTuserID_ > 0 then
 	    begin
+	      output_string outchan " ";
 	      output_string outchan (string_of_int trecord._adhocRTuserID_);
 	      output_string outchan " ";
 	      output_string outchan trecord._adhocRTusername_;
@@ -178,9 +181,9 @@ end
   live as well--and then fill in tweet text, user ids and names, etc, and try to find flows via adhoc retweets 
   by examining the entire dataset again; this cannot be done for text b/c memory pressure even for a relatively
   "small" data set is enormous even with more fine grained memory management. *)
-module Followup : sig 
+module Followup (*: sig 
   val main : unit -> unit (*The only exposed function*)
-end  = struct
+end*) = struct
   let popular_enough = 51;;
   (*Set of old tweets, lacking text, etc*)
   module Tweetset = Set.Make(TweetRecord);;
@@ -300,12 +303,13 @@ end  = struct
 	      let rtext = Yojson.Basic.Util.member "text" retweet_status in
 	      (RetweetParsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)))
   
-  (*From file with entries that look like:    "310250954186444801, Mar 09 04:49:26 2013"
+  (*From file with entries that look like:    "310250954186444801, Mar 09 04:49:26 2013".
+    Had a pair of off by 1 errors that cost many hours to find.
     val trecord_from_string : trecstring:string -> TweetRecord.t
   *)
   let trecord_from_string ~trecstring = 
     let pos = String.index_from trecstring 0 ',' in
-    let id = String.sub trecstring 0 (pos - 1) in
+    let id = String.sub trecstring 0 pos in
     let id_int = int_of_string id in
     let time = String.sub trecstring (pos + 2) ((String.length trecstring) - pos - 2) in
     { TweetRecord._id_ = id_int; 
@@ -466,23 +470,27 @@ end  = struct
       _adhocRTuserID_ = 0;
       _adhocRTusername_ = "";};;
       
-  (*val updateSet : set:Tweetset.t -> tweet:Tweetset.elt -> Tweetset.t*)
+  (*val updateSet : set:Tweetset.t -> tweet:Tweetset.elt -> Tweetset.t
   let updateSet ~set:set ~tweet:tweet = 
-    let toreplace = truncatedTweet ~tweet:tweet in 
-    if (Tweetset.mem toreplace set) then
-      let newset = Tweetset.remove toreplace set in
-      Tweetset.add tweet newset
-    else (*Must not have been popular tweet/retweet, so ignore it*)
-      set;;
+    begin
+      print_string "==updateSet== Should print fattweet record";
+      print_newline ();
+      TweetRecord.print_FatTweetRecord tweet;
+      print_newline ();
+      let toreplace = truncatedTweet ~tweet:tweet in 
+      if (Tweetset.mem toreplace set) then
+	
+	let newset = Tweetset.remove toreplace set in
+	Tweetset.add tweet newset
+      else (*Must not have been popular tweet/retweet, so ignore it*)
+	set
+    end;;*)
 
   (*Given a set of popular tweets and their retweets (non-adhoc)
     go back to the compressed archive and 1) update the set entries
-    with userids, usernames, and tweet text 2) when done, make another hashtable
-    using the records in the set using the original hashtable to determine 
-    key->mappings, then forget about the original hashtable, just keep the new one 
-    and the set.   *)
-  (*Build up the map; specifically fill in missing values within map entries
-    val fillSet : set:Tweetset.t -> compressedfile:string -> Tweetset.t   *)
+    with userids, usernames, and tweet text*)
+  (*Fill in missing values within map entries
+    val fillSet : set:Tweetset.t -> compressedfile:string -> Tweetset.t
   let fillSet ~set ~compressedfile =
     let bz2inchan = openBZ2file ~file:compressedfile in
     let rec consumeBuf ~set ~stringbuf ~startpos =
@@ -533,14 +541,14 @@ end  = struct
 	  updatedset;
 	end
     in
-    helper ~set:set ~bz2inchan:bz2inchan ~chunksize:8388608 ~leftover:"";;
+    helper ~set:set ~bz2inchan:bz2inchan ~chunksize:8388608 ~leftover:"";;*)
   
   (*Using the Set of tweet & retweet (not ad hoc) records that contain text, 
     time, username, userid and the old hashtable of mappings, construct a new
     hashtable of mappings.
     val constructNewHtbl : set:Tweetset.t -> 
     oldHtbl:(TweetRecord.t, TweetRecord.t) Hashtbl.t -> 
-    newHtbl:'a -> unit  *)
+    newHtbl:'a -> unit  
   let constructNewHtbl ~set ~oldHtbl ~newHtbl = 
     let setref = ref set in 
     let semiequal tweetA tweetB = 
@@ -581,7 +589,7 @@ end  = struct
 	newHtbl;
       end
     in
-    helper ~set:setref ~oldHtbl:oldHtbl ~newHtbl:newHtbl;;
+    helper ~set:setref ~oldHtbl:oldHtbl ~newHtbl:newHtbl;;*)
 
   (*Better idea: using old thinset Htbl and new fatset, print the old thinset augmented by the datums
     in the fatset rather than trying to reconstruct a fat version of the htbl; and write to disk as file. 
@@ -594,64 +602,50 @@ end  = struct
   let constructNewHtblOnDisk ~outfile ~fatset ~thinhtbl =
     let outchan = open_out outfile in
     let priorid = ref 0 in
-    let setref = ref fatset in
+    (*let setref = ref fatset in*)
     let semiequal tweetA tweetB = 
       if tweetA.TweetRecord._id_ == tweetB.TweetRecord._id_
       then true else false in
-    let getFromFatSet ~id ~fatsetref = 
-      let sets = Tweetset.partition (semiequal id) !fatset in
-      let one_element = GenericUtility.snd sets in
-      let smallerset = Tweetset.remove one_element !fatset in
-      begin
-	!fatset = smallerset;
-	(one_element, fatset);
-      end 
-    in
     let writeFold outchan fatset treckey trecord = 
-      let id = treckey._id_ in
-      let otherid = trecord._id_ in
-      let fattuple = getFromFatSet ~id:id ~fatset:fatset in
-      let reducedSet = GenericUtility.snd fattuple in
-      let fatkey = GenericUtility.fst fattuple in
-      let fattuple2 = getFromFatSet ~id:otherid ~fatset:reducedSet in
-      let reducedSet2 = GenericUtility.snd fattuple2 in
-      let fatrecord = GenericUtility.fst fattuple2 in
+      let id = treckey.TweetRecord._id_ in
+      let fatkey = Tweetset.choose (Tweetset.filter (semiequal treckey) fatset) in
+      let fatrecord = Tweetset.choose (Tweetset.filter (semiequal trecord) fatset) in
       if id != !priorid then
 	begin 
 	  priorid := id;
 	  output_string outchan (string_of_int id);
 	  output_string outchan ", ";
-	  output_string outchan (string_of_int fatkey._userid_);
+	  output_string outchan (string_of_int fatkey.TweetRecord._userid_);
 	  output_string outchan ", ";
-	  output_string outchan fatkey._username_;
+	  output_string outchan fatkey.TweetRecord._username_;
 	  output_string outchan ", ";
-	  output_string outchan fatkey._text_;
+	  output_string outchan fatkey.TweetRecord._text_;
 	  output_string outchan ", ";
-	  output_string outchan fatkey._time_string_;
-	  if fatkey._adhocRTuserID_ > 0 then
+	  output_string outchan fatkey.TweetRecord._time_string_;
+	  if fatkey.TweetRecord._adhocRTuserID_ > 0 then
 	    begin
 	      output_string outchan " ";
-	      output_string outchan (string_of_int fatkey._adhocRTuserID_);
+	      output_string outchan (string_of_int fatkey.TweetRecord._adhocRTuserID_);
 	      output_string outchan " ";
-	      output_string outchan fatkey._adhocRTusername_;
+	      output_string outchan fatkey.TweetRecord._adhocRTusername_;
 	    end
 	  else ();
 	  output_string outchan " -> ";
-	  output_string outchan (string_of_int fatrecord._id_);
+	  output_string outchan (string_of_int fatrecord.TweetRecord._id_);
 	  output_string outchan ", ";
-	  output_string outchan (string_of_int fatrecord._userid_);
+	  output_string outchan (string_of_int fatrecord.TweetRecord._userid_);
 	  output_string outchan ", ";
-	  output_string outchan fattrecord._username_;
+	  output_string outchan fatrecord.TweetRecord._username_;
 	  output_string outchan ", ";
-	  output_string outchan fattrecord._text_;
+	  output_string outchan fatrecord.TweetRecord._text_;
 	  output_string outchan ", ";
-	  output_string outchan fattrecord._time_string_;
-	  if fattrecord._adhocRTuserID_ > 0 then
+	  output_string outchan fatrecord.TweetRecord._time_string_;
+	  if fatrecord.TweetRecord._adhocRTuserID_ > 0 then
 	    begin
 	      output_string outchan " ";
-	      output_string outchan (string_of_int fatrecord._adhocRTuserID_);
+	      output_string outchan (string_of_int fatrecord.TweetRecord._adhocRTuserID_);
 	      output_string outchan " ";
-	      output_string outchan fatrecord._adhocRTusername_;
+	      output_string outchan fatrecord.TweetRecord._adhocRTusername_;
 	    end
 	  else ();
 	  output_string outchan "\n";
@@ -659,28 +653,32 @@ end  = struct
       else
 	begin (*42 spaces @ present to accomodate source-tweet id, date*)
 	  output_string outchan "                                          | ";
-	  output_string outchan (string_of_int fatrecord._id_);
+	  output_string outchan (string_of_int fatrecord.TweetRecord._id_);
 	  output_string outchan ", ";
-	  output_string outchan (string_of_int fatrecord._userid_);
+	  output_string outchan (string_of_int fatrecord.TweetRecord._userid_);
 	  output_string outchan ", ";
-	  output_string outchan fatrecord._username_;
+	  output_string outchan fatrecord.TweetRecord._username_;
 	  output_string outchan ", ";
-	  output_string outchan fatrecord._text_;
+	  output_string outchan fatrecord.TweetRecord._text_;
 	  output_string outchan ", ";
-	  output_string outchan fatrecord._time_string_;
-	  if trecord._adhocRTuserID_ > 0 then
+	  output_string outchan fatrecord.TweetRecord._time_string_;
+	  if trecord.TweetRecord._adhocRTuserID_ > 0 then
 	    begin
-	      output_string outchan (string_of_int fatrecord._adhocRTuserID_);
+	      output_string outchan (string_of_int fatrecord.TweetRecord._adhocRTuserID_);
 	      output_string outchan " ";
-	      output_string outchan fatrecord._adhocRTusername_;
+	      output_string outchan fatrecord.TweetRecord._adhocRTusername_;
 	    end
 	  else ();
 	  output_string outchan "\n";
 	end
     in
     begin
-      Hashtbl.iter (writeFold outchan) hashtbl;
+      print_string "===Starting to write a fat htbl to disk===";
+      print_newline ();
+      Hashtbl.iter (writeFold outchan fatset) thinhtbl;
       close_out outchan;
+      print_string "===Finished writing fat htbl to disk===";
+      print_newline ();
     end;;
       
 
@@ -806,13 +804,40 @@ end  = struct
 	with _ -> (print_string "Error line 725"; print_newline (); NoParse));;
 
   let updateThinSet ~set:set ~tweet:tweet = 
-    let toreplace = truncatedTweet ~tweet:tweet in 
-    if (FatSet.mem toreplace set) then
+    let predicate ~id tweet =
+      if tweet.TweetRecord._id_ == id then true else false in
+    let p = predicate ~id:tweet.TweetRecord._id_ in
+    let one_elementset = FatSet.filter p set in
+    let truncatedt = truncatedTweet ~tweet:tweet in
+    begin
+      if FatSet.cardinal one_elementset == 1 then 
+	let newset = FatSet.remove truncatedt set in
+	FatSet.add tweet newset;
+      else
+	set
+    (*print_string "==updateThinSet== Should print fattweet record & maybe replace it...";
+      print_newline ();*)
+    (*TweetRecord.print_FatTweetRecord tweet;
+      print_newline ();
+      let toreplace = truncatedTweet ~tweet:tweet in
+      if (FatSet.mem toreplace set) then
+      (print_string "==updateThinSet== Replacing an element...";
+      TweetRecord.print_FatTweetRecord tweet;
+      print_newline ();
       let newset = FatSet.remove toreplace set in
-      FatSet.add tweet newset
-    else (*Must not have been popular tweet/retweet, so ignore it*)
-      set;;  
-
+      FatSet.add tweet newset)
+      else (*Must not have been popular tweet/retweet, so ignore it*)
+      ((*print_string "==updateThinSet== NOT replacing an element...";
+      print_newline ();*)
+      set)*)
+    end;;
+  (*    let toreplace = truncatedTweet ~tweet:tweet in 
+	if (FatSet.mem toreplace set) then
+	let newset = FatSet.remove toreplace set in
+	FatSet.add tweet newset
+	else (*Must not have been popular tweet/retweet, so ignore it*)
+	set;;  *)
+  
   (* val fillFatSet_And_AdhHocTweetSet :
      adhocset:AdHocFatSet.t ->
      fatset:Tweetset.t ->
@@ -845,9 +870,15 @@ end  = struct
 		~username:username ~text:text ?adhocuserid:None ?adhocusername:None in
 	    let updatedSet = updateThinSet ~set:thinset ~tweet:sourcetweet in
 	    let updatedSet2 = updateThinSet ~set:updatedSet ~tweet:retweet in
-	    consumeBuf 
-	      ~stringbuf:stringbuf ~startpos:(nextbreak+1) 
-	      ~thinset:updatedSet2 ~adhocset:adhocset
+	    begin
+	      (*print_string "Sourcetweet:";
+	      TweetRecord.print_FatTweetRecord sourcetweet;
+	      print_string "Retweet:";
+	      TweetRecord.print_FatTweetRecord retweet;*)
+	      consumeBuf 
+		~stringbuf:stringbuf ~startpos:(nextbreak+1) 
+		~thinset:updatedSet2 ~adhocset:adhocset
+	    end
 	| (AdHocRetweetParsed (id, time, userid, username, text, uid_after_rt_at, uname_after_rt_at)) -> 
 	    let adhocrt = 
 	      createTrecord ~id:id ~time:time ~userid:userid 
@@ -893,7 +924,7 @@ end  = struct
     these including full text, tweetid, userid, username, and RT@username & id.
     val submain : unit -> unit * FatSet.t * AdHocFatSet.t
   *)  
-  let submain ~infile ~outfile ~oldhtblfile =
+  let submain ~infile ~outfile ~outfile2 ~oldhtblfile =
     let triple = parseTable4PopularTweets ~file:oldhtblfile in
     let oldhtbl = GenericUtility.fst3 triple in
     let thinset = GenericUtility.snd3 triple in
@@ -901,14 +932,16 @@ end  = struct
     let tuple = 
       fillFatSet_And_AdhHocTweetSet 
 	~adhocset:AdHocFatSet.empty 
-	~thinset: thinset (*FatSet.empty*) 
+	~thinset: thinset
 	~compressedfile:infile in
     let fattweetset = GenericUtility.fst tuple in
     let adhocset = GenericUtility.snd tuple in
-    (*Bug in constructNewHtbl and we don't really need it*)
+    (*Bug in constructNewHtbl and we don't really need it
     let newHtbl = constructNewHtbl ~set:fattweetset ~oldHtbl:oldhtbl 
-      ~newHtbl:tweets_HASHtbl_NEW in
+      ~newHtbl:tweets_HASHtbl_NEW in*)
     begin
+      (*TweetRecord.printlist (Tweetset.elements fattweetset); *)
+      constructNewHtblOnDisk ~outfile:outfile2 ~fatset:fattweetset ~thinhtbl:oldhtbl;
       print_string "===No. of Popular tweets & retweets found: ";
       print_string (string_of_int (FatSet.cardinal fattweetset));
       print_newline ();
@@ -916,12 +949,10 @@ end  = struct
       print_string (string_of_int (AdHocFatSet.cardinal adhocset));
       print_newline ();
       GenericUtility.print2Afile_Int32Map ~amap:freqmap ~outfile:outfile;
-      TweetRecord.printHTable ~hashtbl:newHtbl ~outfile:"fathtbl.txt";
+      (*TweetRecord.printHTable ~hashtbl:newHtbl ~outfile:"fathtbl.txt";*)
       (fattweetset, adhocset);
     end;; 
   
-
-
   (*Given a fatset of popular known tweets and retweets, and a set of adhoc retweets, 
     create a hashtable mapping any known tweet or retweet or any adhoc retweet,
     to any adhoc retweet. Match up RT @ "username" and userID and check that
@@ -987,7 +1018,6 @@ end  = struct
       | [] -> htbl in
     helper ~lista:listA ~listb:listB ~htbl:candidates;;
   
-  
   (*Given an adhoc set of tweets, and a set of popular tweets and retweets, 
     creates a new hashtable mapping potential flows from known popular tweets & 
     retweets to adhoc retweets. Eyeball these and then work on a greatest common
@@ -997,21 +1027,19 @@ end  = struct
     let archive = Sys.argv.(1) in   (* eg "a bz2 file"*)
     let oldhtbl = Sys.argv.(2) in   (* eg "output.txt" from older module run*) 
     let outfile = Sys.argv.(3) in   (* eg "histogram.txt"*)
-    let outfile2 = Sys.argv.(4) in  (* eg "firstrun.txt", place to write possible retweet flows*)
-    let tuple = submain ~infile:archive ~oldhtblfile:oldhtbl ~outfile:outfile in
+    let outfile2 = Sys.argv.(4) in   (* eg "fattbl.txt", to print known tweets and retweets with text & other datums*)
+    let outfile3 = Sys.argv.(5) in  (* eg "firstrun.txt", place to write possible retweet flows*)
+    let tuple = submain ~infile:archive ~oldhtblfile:oldhtbl ~outfile:outfile ~outfile2:outfile2 in
     (*let htbl = GenericUtility.fst3 triple in*)
     let tweets = GenericUtility.fst tuple in 
     let adhocset = GenericUtility.snd tuple in 
     begin
       print_string "===Submain () worked...attempting to find flows...";
       let candidatemappings = constructCandidateFlows ~fatset:tweets ~adhocset:adhocset in
-      TweetRecord.printHTable ~hashtbl:candidatemappings ~outfile:outfile2;
-    end;;
-  
+      TweetRecord.printHTable ~hashtbl:candidatemappings ~outfile:outfile3;
+    end;;  
   
   main ();;
-  
-
 
 (*
   Note that it is easy to recover userids, not just names, from the dataset json, 
@@ -1035,7 +1063,7 @@ end  = struct
   eyeballing. Eventually we'll apply some greatest common substring or locality 
   hash upon text.
   ===== For the smallest set of March 11====
-  No. of Popular tweets & retweets found: 361,623
+  No. of Popular tweets & retweets found: 15,285
   No. of AdHoc tweets (with only 1 RT@username) found: 16,924
 *)
 end

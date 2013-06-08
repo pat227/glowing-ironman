@@ -262,8 +262,8 @@ module ParseBZ2Tweets = struct
       let space3 = (String.index_from time_s_proto space2 ' ') + 1 in
       let space4 = (String.index_from time_s_proto space3 ' ') + 1 in
       let space5 = (String.index_from time_s_proto space4 ' ') + 1 in
-      let length = String.length time_s_proto in
-      let time_s = (String.sub time_s_proto space1 (space4-space1-1)) ^ (String.sub time_s_proto space5 (length-space5)) in
+      let length = String.length time_s_proto in (*Had an off by 1 error here screwing up Followup Module*)
+      let time_s = (String.sub time_s_proto space1 (space4-space1-1)) ^ " " ^ (String.sub time_s_proto space5 (length-space5)) in
       {id = id_i; time_string = time_s}
     in
     (*the heart of this function*)
@@ -318,10 +318,12 @@ module ParseBZ2Tweets = struct
     in
     helper ~bz2inchan:bz2inchan ~outfile:outfile ~htbl:htbl ~chunksize:chunksize ~leftover:"";;  
 
+  (*Always name the output file since it is the input to other functions elsewhere! Confusion easily
+    arises on my part.*)
   (*val main : unit -> 'a*)
   let main () =
     let arg1 = Sys.argv.(1) in   (* eg "mar11.bz2"*) 
-    let arg2 = Sys.argv.(2) in   (* eg "ocamlout.txt"*)
+    let arg2 = Sys.argv.(2) in   (* eg "mar11.txt"*)
     begin
       print_string "\nStarted at: ";
       GenericUtility.print_GMTime ();

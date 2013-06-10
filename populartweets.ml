@@ -1,5 +1,3 @@
-(*This short module needed to provide an ordered type so we can make sets and maps in next module;
-  also defines a few useful operations on the records.*)
 open GenericUtility;;
 open TweetRecord;;
 (*Reconstruct some of the hash table created from first pass from a file--should have a manner of doing so 
@@ -689,6 +687,61 @@ end*) = struct
 		  helper ~lista:lista ~listb:t ~htbl:updatedHtbl2
       | [] -> htbl in
     helper ~lista:listA ~listb:listB ~htbl:candidates;;
+
+
+  (*Given 2 strings, determine length of greatest common substring; use a 2d array*)
+  let lenGCS ~string1 ~string2 = 
+    let rec initializeArray ~array ~i ~m ~n = 
+      if i < m then
+	(array.(i) <- ref (Array.create n 0);
+	 initializeArray ~array:array ~i:(i+1) ~m:m ~n:n;)
+      else 
+	array in
+    let rec analyze ~string1 ~string2 ~array ~i ~imax ~j ~jmax ~maxlen = 
+      if i < imax then
+	(if j < jmax then
+	    (if string1.[i] == string2.[j] then
+		if i == 0 || j == 0 then
+		  (!(array.(i)).(j) <- 1;
+		   analyze ~string1:string1 ~string2:string2 ~array:array 
+		     ~i:i ~imax:imax ~j:(j+1) ~jmax:jmax
+		     ~maxlen:1)
+		else
+		  (!(array.(i)).(j) <- (1 + !(array.(i-1)).(j-1));
+		   if !(array.(i)).(j) > maxlen then 
+		     analyze ~string1:string1 ~string2:string2 ~array:array 
+		       ~i:i ~imax:imax ~j:(j+1) ~jmax:jmax 
+		       ~maxlen:(!(array.(i)).(j))
+		   else
+		     analyze ~string1:string1 ~string2:string2 ~array:array 
+		       ~i:i ~imax:imax ~j:(j+1) ~jmax:jmax 
+		       ~maxlen:maxlen
+		  )
+	     else
+		(!(array.(i)).(j) <- 0;
+		 analyze ~string1:string1 ~string2:string2 ~array:array 
+		   ~i:i ~imax:imax ~j:(j+1) ~jmax:jmax 
+		   ~maxlen:maxlen
+  		)
+	    )
+	 else 
+	    analyze ~string1:string1 ~string2:string2 ~array:array ~i:(i+1) ~imax:imax ~j:0 ~jmax:jmax ~maxlen:maxlen)
+      else
+	maxlen in
+    let len1 = String.length string1 in
+    let len2 = String.length string2 in
+    let outerArray = Array.create len1 (ref (Array.create len2 0)) in
+    let initializedArray = initializeArray ~array:outerArray ~i:0 ~m:len1 ~n:len2 in
+    analyze ~string1:string1 ~string2:string2 
+      ~array:initializedArray ~i:0 ~j:0 
+      ~imax:len1 ~jmax:len2 ~maxlen:0;;
+
+
+  (*Given a htbl mapping candidate flows of tweets to adhoc retweets, for each mapping determine greatest
+    common substring; discard from mappings any with zero common substring, and discard all those below
+    some threshold.*)
+    
+
   
   (*Given an adhoc set of tweets, and a set of popular tweets and retweets, 
     creates a new hashtable mapping potential flows from known popular tweets & 
@@ -711,7 +764,7 @@ end*) = struct
       TweetRecord.printHTable ~hashtbl:candidatemappings ~outfile:outfile3;
     end;;  
   
-  main ();;
+  (*main ();;*)
 
 (*
   Note that it is easy to recover userids, not just names, from the dataset json, 

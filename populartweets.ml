@@ -417,13 +417,13 @@ end*) = struct
 	  None -> (htbl, set, map) (*if nextline in file is new key mapping, add to table prior key/elements 
 		       mapping if exceeds cutoff*)
 	| Some line -> 
-	  (let hasarrow = String.contains line '>' in
-	   let listlength = List.length accum in
-	   let int32listlength = Int32.of_int listlength in
-	   let updatedMap = try 
-			      FreqMap.add int32listlength (Int32.add (Int32.of_int 1) (FreqMap.find int32listlength map)) map 
-	     with Not_found -> FreqMap.add int32listlength (Int32.of_int 1) map in
+	  (let hasarrow = try if Str.search_forward regexp_arrow line 0 > 0 then true else false with _ -> false in
 	   match hasarrow with true ->
+	     let listlength = List.length accum in
+	     let int32listlength = Int32.of_int listlength in
+	     let updatedMap = try (*BUGFIX: I had this next line before the match; this is proper place*)
+	       FreqMap.add int32listlength (Int32.add (Int32.of_int 1) (FreqMap.find int32listlength map)) map 
+	       with Not_found -> FreqMap.add int32listlength (Int32.of_int 1) map in
 	     if listlength > popular_enough then
 	       let tbl_set = addToTable_Set ~list:accum ~tbl:htbl ~set:set in
 	       let updatedTable = GenericUtility.fst(tbl_set) in
@@ -449,7 +449,7 @@ end*) = struct
 	      let onlypart = String.sub line (pos + 2) ((String.length line) - pos - 2) in
 	      let nextelement = trecord_from_string ~trecstring:onlypart in
 	      let updatedaccum = accum @ [nextelement] in
-	      helper ~inchan:inchan ~accum:updatedaccum ~htbl:htbl ~set:set ~map:updatedMap))
+	      helper ~inchan:inchan ~accum:updatedaccum ~htbl:htbl ~set:set ~map:map))
     in
     helper ~inchan:inchan ~accum:[] ~htbl:tweets_HASHtbl_OLD ~set:Tweetset.empty ~map:FreqMap.empty;;
   
@@ -468,128 +468,7 @@ end*) = struct
       _username_ = ""; 
       _text_ = "";
       _adhocRTuserID_ = 0;
-      _adhocRTusername_ = "";};;
-      
-  (*val updateSet : set:Tweetset.t -> tweet:Tweetset.elt -> Tweetset.t
-  let updateSet ~set:set ~tweet:tweet = 
-    begin
-      print_string "==updateSet== Should print fattweet record";
-      print_newline ();
-      TweetRecord.print_FatTweetRecord tweet;
-      print_newline ();
-      let toreplace = truncatedTweet ~tweet:tweet in 
-      if (Tweetset.mem toreplace set) then
-	
-	let newset = Tweetset.remove toreplace set in
-	Tweetset.add tweet newset
-      else (*Must not have been popular tweet/retweet, so ignore it*)
-	set
-    end;;*)
-
-  (*Given a set of popular tweets and their retweets (non-adhoc)
-    go back to the compressed archive and 1) update the set entries
-    with userids, usernames, and tweet text*)
-  (*Fill in missing values within map entries
-    val fillSet : set:Tweetset.t -> compressedfile:string -> Tweetset.t
-  let fillSet ~set ~compressedfile =
-    let bz2inchan = openBZ2file ~file:compressedfile in
-    let rec consumeBuf ~set ~stringbuf ~startpos =
-      let nextbreak = try 
-			String.index_from stringbuf startpos '\n' 
-	with _ -> (print_string "===Consumed 8MB buffer with a prior startpos of: ";
-		   print_string (string_of_int startpos);
-		   print_newline ();
-		   String.length stringbuf) in
-      if nextbreak == (String.length stringbuf) then 
-	(set, startpos)
-      else
-	let toconsume = String.sub stringbuf startpos (nextbreak - startpos) in
-	let tuple = getRetweetsExtraInfo ~line:toconsume in
-	match tuple with 
-	  (RetweetParsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)) -> 
-	    let sourcetweet = 
-	      createTrecord 
-		~id:rid ~time:rtime ~userid:ruserid ~username:rusername 
-		~text:rtext ?adhocuserid:None ?adhocusername:None in
-	    let retweet = 
-	      createTrecord 
-		~id:id ~time:time ~userid:userid ~username:username 
-		~text:text ?adhocuserid:None ?adhocusername:None in
-	    let updatedSet = updateSet ~set:set ~tweet:sourcetweet in
-	    let updatedSet2 = updateSet ~set:updatedSet ~tweet:retweet in
-	    consumeBuf ~stringbuf:stringbuf ~startpos:(nextbreak+1) ~set:updatedSet2;
-	| NoParse -> 
-	  consumeBuf ~set:set ~stringbuf:stringbuf ~startpos:(nextbreak+1)
-	| AdHocRetweetParsed (id, time, userid, username, text, uid_after_rt_at, uname_after_rt_at) -> 
-	  consumeBuf ~set:set ~stringbuf:stringbuf ~startpos:(nextbreak+1)
-    in
-    let rec helper ~set ~bz2inchan ~chunksize ~leftover = 
-      let nextchunk = input_next_x_chars_improved ~bzinchan:bz2inchan ~howmanymore:chunksize in
-      match nextchunk with
-	(Good, toconsume) ->  
-	  let merged = leftover ^ toconsume in 
-	  let t = consumeBuf ~set:set ~stringbuf:merged ~startpos:0 in
-	  let updatedset = GenericUtility.fst t in
-	  let leftoverstart = GenericUtility.snd t in
-	  let leftover = String.sub merged leftoverstart ((String.length merged) - leftoverstart) in	    
-	  helper ~set:updatedset ~bz2inchan:bz2inchan ~chunksize:chunksize ~leftover:leftover;
-      | (_, toconsume) -> 
-	let t = consumeBuf ~set:set ~stringbuf:toconsume ~startpos:0 in
-	let updatedset = GenericUtility.fst t in
-	begin
-	  print_string "===Finished creating popular tweets set===";
-	  updatedset;
-	end
-    in
-    helper ~set:set ~bz2inchan:bz2inchan ~chunksize:8388608 ~leftover:"";;*)
-  
-  (*Using the Set of tweet & retweet (not ad hoc) records that contain text, 
-    time, username, userid and the old hashtable of mappings, construct a new
-    hashtable of mappings.
-    val constructNewHtbl : set:Tweetset.t -> 
-    oldHtbl:(TweetRecord.t, TweetRecord.t) Hashtbl.t -> 
-    newHtbl:'a -> unit  
-  let constructNewHtbl ~set ~oldHtbl ~newHtbl = 
-    let setref = ref set in 
-    let semiequal tweetA tweetB = 
-      if tweetA.TweetRecord._id_ == tweetB.TweetRecord._id_
-      then true else false in
-    let toiter ~newHtbl ~set key binding =
-      let sets = Tweetset.partition (semiequal binding) !set in
-      let toInsert = GenericUtility.fst sets in
-      let sets2 = Tweetset.partition (semiequal key) !set in
-      let key2use = GenericUtility.fst sets2 in
-      begin
-	if Tweetset.cardinal toInsert == 1 && Tweetset.cardinal key2use == 1 then 
-	  (Hashtbl.add newHtbl 
-	     (convertTSelementt2TR (Tweetset.choose key2use)) 
-	     (convertTSelementt2TR (Tweetset.choose toInsert));
-	   (*update the ref in next line; do not use sets2, we need the set to 
-	     always hold the key since we're dealing with multiple bindings; 
-	     otherwise we'd get back an empty set upon next iter and partition 
-	     and have no key to use at all in above line.*)
-           set := GenericUtility.snd sets)
-	else
-	  (print_string "===This should never happen, line 566; expect exactly 1 key value pair===";
-	   print_newline ();
-	   print_string "toInsert elems: ";
-	   let elems = Tweetset.elements toInsert in
-	   TweetRecord.printlist elems;
-	   print_string "key2use elems: ";
-	   let elems = Tweetset.elements key2use in
-	   TweetRecord.printlist elems;)
-      end
-    in
-    let rec helper ~set ~oldHtbl ~newHtbl = 
-      begin
-	let williter = toiter ~newHtbl:newHtbl ~set:set in
-	Hashtbl.iter williter oldHtbl;
-	print_string "===Finished creating fat htbl===";
-	print_newline ();
-	newHtbl;
-      end
-    in
-    helper ~set:setref ~oldHtbl:oldHtbl ~newHtbl:newHtbl;;*)
+      _adhocRTusername_ = "";};;    
 
   (*Better idea: using old thinset Htbl and new fatset, print the old thinset augmented by the datums
     in the fatset rather than trying to reconstruct a fat version of the htbl; and write to disk as file. 
@@ -714,23 +593,6 @@ end*) = struct
     (if userid_adhoc == `Null || username_adhoc == `Null then print_string "===Error starts here===" else ();
     (userid_adhoc, username_adhoc));;
 
-  (*Only invoke this if getUID_fromAdhocRT_mention function fails; this one only 
-    returns the user name without the--missing--user id. 
-  let getUID_name_only ~tweetjson = 
-    let textj = Yojson.Basic.Util.member "text" tweetjson in
-    let text = Yojson.Basic.to_string textj in
-    let regexp_retweet = Str.regexp "\\(\\(RT[^@]@\\)\\|\\(RT[^@][^@]@\\)\\)" in
-    let regexpAT = Str.regexp "@" in
-    let regexpSpace = Str.regexp " " in
-    let firstpos = try Str.search_forward regexp_retweet text 0 with _ -> -1 in
-    let secondpos = try Str.search_forward regexpAT text (firstpos+1) with _ -> -1 in
-    let thirdpos = try Str.search_forward regexpSpace text (secondpos+1) with _ -> -1 in
-    let fourthpos = try Str.search_forward regexpSpace text (thirdpos+1) with _ -> -1 in
-    let username = try String.sub text (thirdpos+1) (fourthpos-thirdpos) with _ -> "" in
-    let username_json = Yojson.Basic.from_string username in
-    let zerojson = Yojson.Basic.from_string "0" in
-    (username_json, zerojson);;*)
-
   (*===BETTER COMBINED FUNCTION VERSION=== 
     So we can do 1 pass over bz2 file, build our fatset and collect adhoc retweets in same pass.
     val getALLRetweets : line:string -> parse_result
@@ -809,34 +671,19 @@ end*) = struct
     let p = predicate ~id:tweet.TweetRecord._id_ in
     let one_elementset = FatSet.filter p set in
     let truncatedt = truncatedTweet ~tweet:tweet in
+    let oldcount = FatSet.cardinal set in
     begin
       if FatSet.cardinal one_elementset == 1 then 
 	let newset = FatSet.remove truncatedt set in
+	let count = FatSet.cardinal newset in
+	if count != (oldcount-1) then
+	  (print_string "Error; line 818; set not reducing by one!";
+	   exit 2;)
+	else ();	  
 	FatSet.add tweet newset;
       else
 	set
-    (*print_string "==updateThinSet== Should print fattweet record & maybe replace it...";
-      print_newline ();*)
-    (*TweetRecord.print_FatTweetRecord tweet;
-      print_newline ();
-      let toreplace = truncatedTweet ~tweet:tweet in
-      if (FatSet.mem toreplace set) then
-      (print_string "==updateThinSet== Replacing an element...";
-      TweetRecord.print_FatTweetRecord tweet;
-      print_newline ();
-      let newset = FatSet.remove toreplace set in
-      FatSet.add tweet newset)
-      else (*Must not have been popular tweet/retweet, so ignore it*)
-      ((*print_string "==updateThinSet== NOT replacing an element...";
-      print_newline ();*)
-      set)*)
     end;;
-  (*    let toreplace = truncatedTweet ~tweet:tweet in 
-	if (FatSet.mem toreplace set) then
-	let newset = FatSet.remove toreplace set in
-	FatSet.add tweet newset
-	else (*Must not have been popular tweet/retweet, so ignore it*)
-	set;;  *)
   
   (* val fillFatSet_And_AdhHocTweetSet :
      adhocset:AdHocFatSet.t ->
@@ -1030,10 +877,11 @@ end*) = struct
     let outfile2 = Sys.argv.(4) in   (* eg "fattbl.txt", to print known tweets and retweets with text & other datums*)
     let outfile3 = Sys.argv.(5) in  (* eg "firstrun.txt", place to write possible retweet flows*)
     let tuple = submain ~infile:archive ~oldhtblfile:oldhtbl ~outfile:outfile ~outfile2:outfile2 in
-    (*let htbl = GenericUtility.fst3 triple in*)
+    let htbl = GenericUtility.fst3 triple in
     let tweets = GenericUtility.fst tuple in 
-    let adhocset = GenericUtility.snd tuple in 
+    let adhocset = GenericUtility.snd tuple in
     begin
+      submain ~infile:archive ~oldhtblfile:oldhtbl ~outfile:outfile ~outfile2:outfile2;
       print_string "===Submain () worked...attempting to find flows...";
       let candidatemappings = constructCandidateFlows ~fatset:tweets ~adhocset:adhocset in
       TweetRecord.printHTable ~hashtbl:candidatemappings ~outfile:outfile3;

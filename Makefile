@@ -4,6 +4,9 @@ all: $(EXECUTABLES)
 GenericUtility.cmx: 
 	ocamlopt -c GenericUtility.ml
 
+TweetRecord.cmx: GenericUtility.cmx
+	ocamlopt GenericUtility.cmx -c TweetRecord.ml
+
 SeperateTWEETS.cmx: GenericUtility.cmx
 	ocamlopt -c str.cmxa SeperateTWEETS.ml
 
@@ -13,8 +16,8 @@ twitParser: GenericUtility.cmx twitsParser.ml
 a.out: GenericUtility.cmx SeperateTWEETS.cmx
 	ocamlopt unix.cmxa str.cmxa $^ main.ml
 
-populartweets: GenericUtility.cmx populartweets.ml
-	ocamlopt -I /usr/local/lib/ocaml/site-lib/easy-format -I /usr/local/lib/ocaml/site-lib/biniou -I /usr/local/lib/ocaml/site-lib/bz2 -I /usr/local/lib/ocaml/site-lib/yojson easy_format.cmx biniou.cmxa bz2.cmxa unix.cmxa str.cmxa yojson.cmx GenericUtility.cmx populartweets.ml -o populartweets
+populartweets: GenericUtility.cmx TweetRecord.cmx populartweets.ml
+	ocamlopt -I /usr/local/lib/ocaml/site-lib/easy-format -I /usr/local/lib/ocaml/site-lib/biniou -I /usr/local/lib/ocaml/site-lib/bz2 -I /usr/local/lib/ocaml/site-lib/yojson easy_format.cmx biniou.cmxa bz2.cmxa unix.cmxa str.cmxa yojson.cmx GenericUtility.cmx TweetRecord.cmx populartweets.ml -o populartweets
 
 clean:
 	rm $(EXECUTABLES) *.o *.cmx *.cmi

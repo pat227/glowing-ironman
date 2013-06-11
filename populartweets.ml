@@ -745,7 +745,7 @@ end*) = struct
 		  (!(array.(i)).(j) <- 1;
 		   analyze ~string1:string1 ~string2:string2 ~array:array 
 		     ~i:i ~imax:imax ~j:(j+1) ~jmax:jmax
-		     ~maxlen:1)
+		     ~maxlen:maxlen)
 		else
 		  (!(array.(i)).(j) <- (1 + !(array.(i-1)).(j-1));
 		   if !(array.(i)).(j) > maxlen then 
@@ -779,23 +779,27 @@ end*) = struct
 
   (*Given a htbl mapping candidate flows of tweets to adhoc retweets, for each mapping determine greatest
     common substring; discard from mappings any with zero common substring, and discard all those below
-    some threshold.
+    some threshold, which adapts to short and long usernames appearing in the text.
     val filterCandidates :
     htbl:(TweetRecord.t, TweetRecord.t) Hashtbl.t ->
     newhtbl:(TweetRecord.t, TweetRecord.t) Hashtbl.t -> unit
   *)
-  let filterCandidates ~htbl ~newhtbl =
-    let cutoff = 15 in
+  let filterCandidates ~htbl ~newhtbl ~cutoff =
     let toIter treckey trecvalue = 
-      if (lenGCS ~string1:treckey.TweetRecord._text_ ~string2:trecvalue.TweetRecord._text_) >= cutoff then
+      let usernamelen = String.length trecvalue.TweetRecord._adhocRTusername_ in
+      if ((lenGCS ~string1:treckey.TweetRecord._text_ ~string2:trecvalue.TweetRecord._text_) 
+	  - usernamelen) >= cutoff then
 	Hashtbl.add newhtbl treckey trecvalue
       else () in
     Hashtbl.iter toIter htbl;;
 
   (*In case we want to filter candidate mappings from a file, instead of a live one in memory, use this function.
-
+    Would save the time of having to invoke all the other functions all over again on a very large archive if
+    we've already done that work. Only retains mappings whose greatest common substring is above some threshold, 
+    which is adapted to long and short usernames appearing in the text.
+    val parseMappings_AndFilter : file:string -> (TweetRecord.t, TweetRecord.t) Hashtbl.t
   *)
-  let parseMappings_AndFilter ~file =
+  let parseMappings_AndFilter ~file ~cutoff =
     let inchan = open_in file in
     let regexp_arrow = Str.regexp " -> " in
     let newhtbl = Hashtbl.create(16384) in
@@ -817,26 +821,55 @@ end*) = struct
 	match hasarrow with true ->
 	  let pos = Str.search_forward regexp_arrow line 0 in
 	  let firstHalf = String.sub line 0 pos in
-	  let newkey = trecord_from_string ~trecstring:firstHalf in
+	  let newkey = fat_trecord_from_string ~trecstring:firstHalf in
 	  let secondHalf = String.sub line (pos+4) ((String.length line) - pos - 4) in
-	  let firstelement = trecord_from_string ~trecstring:secondHalf in
+	  let firstelement = fat_trecord_from_string ~trecstring:secondHalf in
 	  let gcsubstring = lenGCS ~string1:(newkey.TweetRecord._text_) ~string2:(firstelement.TweetRecord._text_) in
-	  if gcsubstring > 7 then
-	    (Hashtbl.add htbl newkey firstelement;
-	     key := newkey;
-	     reconstruct ~inchan:inchan ~htbl:htbl)
-	  else 
-	    reconstruct ~inchan:inchan ~htbl:htbl
+	  let usernamelen = String.length firstelement.TweetRecord._adhocRTusername_ in
+	  begin
+	    key := newkey;
+(*	    print_string "From line:";
+	    print_string line;
+	    print_newline ();
+	    print_string "Comparing: ";
+	    print_newline ();
+	    print_string newkey.TweetRecord._text_;
+	    print_newline ();
+	    print_string firstelement.TweetRecord._text_;
+	    print_newline ();
+	    print_string ("GCS: " ^ (string_of_int gcsubstring));
+	    print_newline ();*)
+	    if (gcsubstring - usernamelen) > cutoff then
+	      (Hashtbl.add htbl newkey firstelement;
+	       key := newkey;
+	       reconstruct ~inchan:inchan ~htbl:htbl)
+	    else 
+	      reconstruct ~inchan:inchan ~htbl:htbl
+	  end
 	| false ->
 	  let pos = String.index line '|' in
-	  let onlypart = String.sub line (pos + 2) ((String.length line) - pos - 2) in
-	  let nextelement = trecord_from_string ~trecstring:onlypart in
+	  let onlypart = String.trim (String.sub line (pos+1) ((String.length line) - pos - 1)) in
+	  let nextelement = fat_trecord_from_string ~trecstring:onlypart in
 	  let gcsubstring = lenGCS ~string1:((!key).TweetRecord._text_) ~string2:(nextelement.TweetRecord._text_) in
-	  if gcsubstring > 7 then
-	    (Hashtbl.add htbl !key nextelement;
-	     reconstruct ~inchan:inchan ~htbl:htbl)
-	  else 
-	    reconstruct ~inchan:inchan ~htbl:htbl
+	  let usernamelen = String.length nextelement.TweetRecord._adhocRTusername_ in
+	  begin
+(*	    print_string "From line:";
+	    print_string line;
+	    print_newline ();
+	    print_string "Comparing: ";
+	    print_newline ();
+	    print_string (!key).TweetRecord._text_;
+	    print_newline ();
+	    print_string nextelement.TweetRecord._text_;
+	    print_newline ();
+	    print_string ("GCS: " ^ (string_of_int gcsubstring));
+	    print_newline ();*)
+	    if (gcsubstring - usernamelen) > cutoff then
+	      (Hashtbl.add htbl !key nextelement;
+	       reconstruct ~inchan:inchan ~htbl:htbl)
+	    else 
+	      reconstruct ~inchan:inchan ~htbl:htbl
+	  end
     in
     reconstruct ~inchan:inchan ~htbl:newhtbl;;
 	
@@ -847,11 +880,12 @@ end*) = struct
     val main : unit -> unit *)
   let main () =
     let archive = Sys.argv.(1) in   (* eg "a bz2 file"*)
-    let oldhtbl = Sys.argv.(2) in   (* eg "output.txt" from older module run*) 
-    let outfile = Sys.argv.(3) in   (* eg "histogram.txt"*)
-    let outfile2 = Sys.argv.(4) in  (* eg "fattbl.txt", to print known tweets and retweets with text & other datums*)
-    let outfile3 = Sys.argv.(5) in  (* eg "firstrun.txt", place to write possible retweet flows*)
-    let outfile4 = Sys.argv.(6) in 
+    let oldhtbl = Sys.argv.(2) in   (* eg "date_output.txt" from older module run*) 
+    let outfile = Sys.argv.(3) in   (* eg "date_histogram.txt"*)
+    let outfile2 = Sys.argv.(4) in  (* eg "date_fattbl.txt", to print known tweets and retweets with text & other datums*)
+    let outfile3 = Sys.argv.(5) in  (* eg "date_firstrun.txt", to write possible retweet flows*)
+    let outfile4 = Sys.argv.(6) in  (* eg "date_filtered.txt", to write filtered flows w/min greatest common substring *)
+    let cutoff = Sys.argv.(7) in    (* eg  17, the min greatest common substring to pass the filter *)
     let tuple = submain ~infile:archive ~oldhtblfile:oldhtbl ~outfile:outfile ~outfile2:outfile2 in
     (*let htbl = GenericUtility.fst3 triple in*)
     let tweets = GenericUtility.fst tuple in 
@@ -860,12 +894,12 @@ end*) = struct
       print_string "===Submain () worked...attempting to find flows...";
       let candidatemappings = constructCandidateFlows ~fatset:tweets ~adhocset:adhocset in
       let filteredmappings = (Hashtbl.create(16384)) in
-      filterCandidates ~htbl:candidatemappings ~newhtbl:filteredmappings;
+      filterCandidates ~htbl:candidatemappings ~newhtbl:filteredmappings ~cutoff:cutoff;
       TweetRecord.printHTable ~hashtbl:candidatemappings ~outfile:outfile3;
       TweetRecord.printHTable ~hashtbl:filteredmappings ~outfile:outfile4;
     end;;
   
-  (*main ();;*)
+  main ();;
 
 (*
   Note that it is easy to recover userids, not just names, from the dataset json, 
@@ -892,5 +926,6 @@ end*) = struct
   No. of Popular tweets & retweets found: 15,285
   No. of AdHoc tweets (with only 1 RT@username) found: 16,924
   No. of candidate mappings found: about 900
+  No of filtered (minimum greatest common substring of 17 chars) mappings found: about 500
 *)
 end

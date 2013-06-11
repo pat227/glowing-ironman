@@ -142,6 +142,44 @@ end*) = struct
       _text_ = ""; 
       _adhocRTuserID_ = 0;
       _adhocRTusername_ = ""; };; 
+
+
+  (*Input string of either of the 2 forms below and return TweetRecord:
+    311024024014684161, 34507480, "ArianaGrande", "These cupcakes are the most incredible things I've ever seen. http://t.co/k8yfBZzZ2C", Mar 11 08:01:20 2013
+    or
+    311173660545253376, 347329582, "NACBREDA_", "RT @ArianaGrande: http://t.co/339B7KLLOJ - &lt;3_&lt;3", Mar 11 17:55:56 2013, 34507480, "ArianaGrande"
+    val fat_trecord_from_string -> ~trecstring:string -> TweetRecord.t
+  *)
+  let fat_trecord_from_string ~trecstring = 
+    let len = String.length trecstring in
+    let pos = String.index_from trecstring 0 ',' in
+    let pos2 = String.index_from trecstring (pos+1) ',' in
+    let pos3 = String.index_from trecstring (pos2+1) ',' in
+    let endoftext_regexp = Str.regexp_string "\", " in
+    let pos4 = Str.search_forward endoftext_regexp trecstring (pos3+1) in
+    let pos5 = try String.index_from trecstring (pos4+3) ',' with _ -> len in
+    let pos6 = try String.index_from trecstring (pos5+1) ',' with _ -> len in
+    let tweet_text = String.trim (try String.sub trecstring (pos3+3) (pos4-pos3-3) with _ -> "line 161") in
+    let id = String.trim (String.sub trecstring 0 pos) in
+    let id_int = try int_of_string id with _ -> (print_string "163"; 163) in
+    let useridstring = String.trim (try String.sub trecstring (pos+2) (pos2-pos-2) with _ -> "line 164") in
+    let userid = try int_of_string useridstring with _ -> (print_string "165"; 165) in
+    let username = String.trim (try String.sub trecstring (pos2+3) (pos3-pos2-4) with _ -> "line 166") in
+    let timestring = String.trim (try String.sub trecstring (pos4+3) (pos5-pos4-3) with _ -> "line 167") in
+    let t = { TweetRecord._id_ = id_int; 
+	      _time_string_ = timestring; 
+	      _userid_ = userid ; 
+	      _username_ = username; 
+	      _text_ = tweet_text; 
+	      _adhocRTuserID_ = 0;
+	      _adhocRTusername_ = ""; } in
+    if pos5 < len then
+      let adhoc_rt_userid_string = String.trim (try String.sub trecstring (pos5+1) (pos6-pos5-1) with _ -> "176") in
+      let adhoc_rt_userid = try int_of_string adhoc_rt_userid_string with _ -> (print_string adhoc_rt_userid_string; 177) in
+      let adhoc_rt_username = String.trim (try String.sub trecstring (pos6+3) (len-pos6-4) with _ -> "178") in
+      { t with TweetRecord._adhocRTuserID_ = adhoc_rt_userid; _adhocRTusername_ = adhoc_rt_username;} 
+    else
+      t;;
   
   (*(Parsed (id, time, userid, username, text, rid, rtime, ruserid, rusername, rtext)))
     val createTrecord :
@@ -237,42 +275,42 @@ end*) = struct
     let rec helper ~inchan ~accum ~htbl ~set ~map =
       let nextline = try (Some (input_line inchan)) with End_of_file -> (close_in inchan; None) in
       match nextline with 
-	  None -> (htbl, set, map) (*if nextline in file is new key mapping, add to table prior key/elements 
-		       mapping if exceeds cutoff*)
-	| Some line -> 
-	  (let hasarrow = try if Str.search_forward regexp_arrow line 0 > 0 then true else false with _ -> false in
-	   match hasarrow with true ->
-	     let listlength = List.length accum in
-	     let int32listlength = Int32.of_int listlength in
-	     let updatedMap = try (*BUGFIX: I had this next line before the match; this is proper place*)
-	       FreqMap.add int32listlength (Int32.add (Int32.of_int 1) (FreqMap.find int32listlength map)) map 
-	       with Not_found -> FreqMap.add int32listlength (Int32.of_int 1) map in
-	     if listlength > popular_enough then
-	       let tbl_set = addToTable_Set ~list:accum ~tbl:htbl ~set:set in
-	       let updatedTable = GenericUtility.fst(tbl_set) in
-	       let updatedSet = GenericUtility.snd(tbl_set) in
-	       let pos = Str.search_forward regexp_arrow line 0 in
-	       let firstHalf = String.sub line 0 pos in
-	       let key = trecord_from_string ~trecstring:firstHalf in
-	       let secondHalf = String.sub line (pos+4) ((String.length line) - pos - 4) in
-	       let firstelement = trecord_from_string ~trecstring:secondHalf in
-	       let updatedaccum = key :: firstelement :: [] in
-	       helper ~inchan:inchan ~accum:updatedaccum ~htbl:updatedTable ~set:updatedSet ~map:updatedMap
-	     else 
-	       let pos = Str.search_forward regexp_arrow line 0 in
-	       let firstHalf = String.sub line 0 pos in
-	       let key = trecord_from_string ~trecstring:firstHalf in
-	       let secondHalf = String.sub line (pos+4) ((String.length line) - pos - 4) in
-	       let firstelement = trecord_from_string ~trecstring:secondHalf in
-	       let updatedaccum = key :: firstelement :: [] in
-	       helper ~inchan:inchan ~accum:updatedaccum ~htbl:htbl ~set:set ~map:updatedMap
+	None -> (htbl, set, map) (*if nextline in file is new key mapping, add to table prior key/elements 
+				   mapping if exceeds cutoff*)
+      | Some line -> 
+	(let hasarrow = try if Str.search_forward regexp_arrow line 0 > 0 then true else false with _ -> false in
+	 match hasarrow with true ->
+	   let listlength = List.length accum in
+	   let int32listlength = Int32.of_int listlength in
+	   let updatedMap = try (*BUGFIX: I had this next line before the match; this is proper place*)
+	     FreqMap.add int32listlength (Int32.add (Int32.of_int 1) (FreqMap.find int32listlength map)) map 
+	     with Not_found -> FreqMap.add int32listlength (Int32.of_int 1) map in
+	   if listlength > popular_enough then
+	     let tbl_set = addToTable_Set ~list:accum ~tbl:htbl ~set:set in
+	     let updatedTable = GenericUtility.fst(tbl_set) in
+	     let updatedSet = GenericUtility.snd(tbl_set) in
+	     let pos = Str.search_forward regexp_arrow line 0 in
+	     let firstHalf = String.sub line 0 pos in
+	     let key = trecord_from_string ~trecstring:firstHalf in
+	     let secondHalf = String.sub line (pos+4) ((String.length line) - pos - 4) in
+	     let firstelement = trecord_from_string ~trecstring:secondHalf in
+	     let updatedaccum = key :: firstelement :: [] in
+	     helper ~inchan:inchan ~accum:updatedaccum ~htbl:updatedTable ~set:updatedSet ~map:updatedMap
+	   else 
+	     let pos = Str.search_forward regexp_arrow line 0 in
+	     let firstHalf = String.sub line 0 pos in
+	     let key = trecord_from_string ~trecstring:firstHalf in
+	     let secondHalf = String.sub line (pos+4) ((String.length line) - pos - 4) in
+	     let firstelement = trecord_from_string ~trecstring:secondHalf in
+	     let updatedaccum = key :: firstelement :: [] in
+	     helper ~inchan:inchan ~accum:updatedaccum ~htbl:htbl ~set:set ~map:updatedMap
 	   (*if nextline in file is another mapping for same prior key, grow list of mappings*)
-	   | false ->
-	     (let pos = String.index line '|' in
-	      let onlypart = String.sub line (pos + 2) ((String.length line) - pos - 2) in
-	      let nextelement = trecord_from_string ~trecstring:onlypart in
-	      let updatedaccum = accum @ [nextelement] in
-	      helper ~inchan:inchan ~accum:updatedaccum ~htbl:htbl ~set:set ~map:map))
+	 | false ->
+	   (let pos = String.index line '|' in
+	    let onlypart = String.sub line (pos + 2) ((String.length line) - pos - 2) in
+	    let nextelement = trecord_from_string ~trecstring:onlypart in
+	    let updatedaccum = accum @ [nextelement] in
+	    helper ~inchan:inchan ~accum:updatedaccum ~htbl:htbl ~set:set ~map:map))
     in
     helper ~inchan:inchan ~accum:[] ~htbl:tweets_HASHtbl_OLD ~set:Tweetset.empty ~map:FreqMap.empty;;
   
@@ -689,7 +727,9 @@ end*) = struct
     helper ~lista:listA ~listb:listB ~htbl:candidates;;
 
 
-  (*Given 2 strings, determine length of greatest common substring; use a 2d array*)
+  (*Given 2 strings, determine length of greatest common substring; use a 2d array.
+    val lenGCS: string -> string -> int
+  *)
   let lenGCS ~string1 ~string2 = 
     let rec initializeArray ~array ~i ~m ~n = 
       if i < m then
@@ -739,10 +779,67 @@ end*) = struct
 
   (*Given a htbl mapping candidate flows of tweets to adhoc retweets, for each mapping determine greatest
     common substring; discard from mappings any with zero common substring, and discard all those below
-    some threshold.*)
-    
+    some threshold.
+    val filterCandidates :
+    htbl:(TweetRecord.t, TweetRecord.t) Hashtbl.t ->
+    newhtbl:(TweetRecord.t, TweetRecord.t) Hashtbl.t -> unit
+  *)
+  let filterCandidates ~htbl ~newhtbl =
+    let cutoff = 15 in
+    let toIter treckey trecvalue = 
+      if (lenGCS ~string1:treckey.TweetRecord._text_ ~string2:trecvalue.TweetRecord._text_) >= cutoff then
+	Hashtbl.add newhtbl treckey trecvalue
+      else () in
+    Hashtbl.iter toIter htbl;;
 
-  
+  (*In case we want to filter candidate mappings from a file, instead of a live one in memory, use this function.
+
+  *)
+  let parseMappings_AndFilter ~file =
+    let inchan = open_in file in
+    let regexp_arrow = Str.regexp " -> " in
+    let newhtbl = Hashtbl.create(16384) in
+    let key = ref {TweetRecord._id_=0; 
+		   _userid_=0; 
+		   _username_=""; 
+		   _time_string_=""; 
+		   _text_=""; 
+		   _adhocRTuserID_=0; 
+		   _adhocRTusername_="" } in
+    (*Reconstruct the htbl in memory from the file while only adding those mappings whose greatest common substring
+      is above some cutoff; tweak the cutoff for best results.*)
+    let rec reconstruct ~inchan ~htbl =
+      let nextline = try (Some (input_line inchan)) with End_of_file -> (close_in inchan; None) in
+      match nextline with 
+	None -> htbl
+      | Some line -> 
+	let hasarrow = try if Str.search_forward regexp_arrow line 0 > 0 then true else false with _ -> false in
+	match hasarrow with true ->
+	  let pos = Str.search_forward regexp_arrow line 0 in
+	  let firstHalf = String.sub line 0 pos in
+	  let newkey = trecord_from_string ~trecstring:firstHalf in
+	  let secondHalf = String.sub line (pos+4) ((String.length line) - pos - 4) in
+	  let firstelement = trecord_from_string ~trecstring:secondHalf in
+	  let gcsubstring = lenGCS ~string1:(newkey.TweetRecord._text_) ~string2:(firstelement.TweetRecord._text_) in
+	  if gcsubstring > 7 then
+	    (Hashtbl.add htbl newkey firstelement;
+	     key := newkey;
+	     reconstruct ~inchan:inchan ~htbl:htbl)
+	  else 
+	    reconstruct ~inchan:inchan ~htbl:htbl
+	| false ->
+	  let pos = String.index line '|' in
+	  let onlypart = String.sub line (pos + 2) ((String.length line) - pos - 2) in
+	  let nextelement = trecord_from_string ~trecstring:onlypart in
+	  let gcsubstring = lenGCS ~string1:((!key).TweetRecord._text_) ~string2:(nextelement.TweetRecord._text_) in
+	  if gcsubstring > 7 then
+	    (Hashtbl.add htbl !key nextelement;
+	     reconstruct ~inchan:inchan ~htbl:htbl)
+	  else 
+	    reconstruct ~inchan:inchan ~htbl:htbl
+    in
+    reconstruct ~inchan:inchan ~htbl:newhtbl;;
+	
   (*Given an adhoc set of tweets, and a set of popular tweets and retweets, 
     creates a new hashtable mapping potential flows from known popular tweets & 
     retweets to adhoc retweets. Eyeball these and then work on a greatest common
@@ -752,8 +849,9 @@ end*) = struct
     let archive = Sys.argv.(1) in   (* eg "a bz2 file"*)
     let oldhtbl = Sys.argv.(2) in   (* eg "output.txt" from older module run*) 
     let outfile = Sys.argv.(3) in   (* eg "histogram.txt"*)
-    let outfile2 = Sys.argv.(4) in   (* eg "fattbl.txt", to print known tweets and retweets with text & other datums*)
+    let outfile2 = Sys.argv.(4) in  (* eg "fattbl.txt", to print known tweets and retweets with text & other datums*)
     let outfile3 = Sys.argv.(5) in  (* eg "firstrun.txt", place to write possible retweet flows*)
+    let outfile4 = Sys.argv.(6) in 
     let tuple = submain ~infile:archive ~oldhtblfile:oldhtbl ~outfile:outfile ~outfile2:outfile2 in
     (*let htbl = GenericUtility.fst3 triple in*)
     let tweets = GenericUtility.fst tuple in 
@@ -761,8 +859,11 @@ end*) = struct
     begin
       print_string "===Submain () worked...attempting to find flows...";
       let candidatemappings = constructCandidateFlows ~fatset:tweets ~adhocset:adhocset in
+      let filteredmappings = (Hashtbl.create(16384)) in
+      filterCandidates ~htbl:candidatemappings ~newhtbl:filteredmappings;
       TweetRecord.printHTable ~hashtbl:candidatemappings ~outfile:outfile3;
-    end;;  
+      TweetRecord.printHTable ~hashtbl:filteredmappings ~outfile:outfile4;
+    end;;
   
   (*main ();;*)
 
@@ -790,5 +891,6 @@ end*) = struct
   ===== For the smallest set of March 11====
   No. of Popular tweets & retweets found: 15,285
   No. of AdHoc tweets (with only 1 RT@username) found: 16,924
+  No. of candidate mappings found: about 900
 *)
 end
